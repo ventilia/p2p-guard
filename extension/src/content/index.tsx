@@ -1,0 +1,185 @@
+/**
+ * Content script: монтирует панель в Shadow DOM, пересылает в background
+ * перехваченные страницей данные и снимает запасной слепок с вёрстки.
+ *
+ * В наш API отсюда не ходим — весь сетевой обмен только через background,
+ * чтобы токен доступа не оказался в контексте страницы биржи.
+ */
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { Panel } from './Panel.js';
+import { panelStyles } from './styles.js';
+import { sendMessage } from '../shared/messages.js';
+import type { DomSnapshot } from '../shared/types.js';
+
+const HOST_ID = 'p2p-guard-root';
+const CHANNEL = 'p2p-guard';
+
+/**
+ * Хук должен встать ДО первых запросов страницы, поэтому вставляем его
+ * синхронно в самое начало документа.
+ */
+function injectPageHook(): void {
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('page-hook.js');
+    script.async = false;
+    script.onload = () => script.remove();
+    (document.head ?? document.documentElement).prepend(script);
+  } catch (err) {
+    console.warn('[P2P Guard] не удалось внедрить хук страницы', err);
+  }
+}
+
+function mountPanel(): void {
+  if (document.getElementById(HOST_ID)) return;
+
+  const host = document.createElement('div');
+  host.id = HOST_ID;
+  document.documentElement.appendChild(host);
+
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const style = document.createElement('style');
+  style.textContent = panelStyles;
+  shadow.appendChild(style);
+
+  const container = document.createElement('div');
+  shadow.appendChild(container);
+
+  createRoot(container).render(
+    <StrictMode>
+      <Panel />
+    </StrictMode>,
+  );
+}
+
+// ───────────────────────────── Мост со страницей ─────────────────────────────
+
+function listenPageMessages(): void {
+  window.addEventListener('message', (event: MessageEvent) => {
+    if (event.source !== window) return;
+    const data = event.data as
+      | { source?: string; type?: string; payload?: unknown }
+      | null;
+    if (!data || data.source !== CHANNEL) return;
+
+    switch (data.type) {
+      case 'WS_INTERCEPT':
+        void sendMessage({ type: 'WS_MESSAGE', payload: data.payload });
+        break;
+
+      case 'NET_CAPTURE': {
+        const capture = data.payload as {
+          url: string;
+          method: string;
+          headers: Record<string, string>;
+          requestBody: unknown;
+          responseBody: unknown;
+        };
+        void sendMessage({
+          type: 'NET_CAPTURE',
+          url: capture.url,
+          method: capture.method,
+          headers: capture.headers ?? {},
+          requestBody: capture.requestBody ?? null,
+          responseBody: capture.responseBody ?? null,
+        });
+        break;
+      }
+
+      case 'URL_CHANGED': {
+        const orderId = orderIdFromUrl(location.href);
+        if (orderId) void sendMessage({ type: 'DETECT_ORDER', orderId });
+        scheduleScrape();
+        break;
+      }
+
+      default:
+        break;
+    }
+  });
+}
+
+const orderIdFromUrl = (url: string): string | null =>
+  /(?:orderNo|orderNumber|adOrderNo|orderId)=(\d{6,32})/i.exec(url)?.[1] ??
+  /\/(\d{15,32})(?:\/|$|\?)/.exec(url)?.[1] ??
+  null;
+
+// ───────────────────────────── Запасной разбор DOM ─────────────────────────────
+
+/**
+ * Если приватный API недоступен, ник и UID контрагента всё равно есть на
+ * странице: Binance ставит ссылку на профиль с advertiserNo/userNo.
+ */
+function scrapeDom(): DomSnapshot | null {
+  const snapshot: DomSnapshot = {};
+
+  const orderId = orderIdFromUrl(location.href);
+  if (orderId) snapshot.orderId = orderId;
+
+  const profileLink = document.querySelector<HTMLAnchorElement>(
+    'a[href*="advertiserNo="], a[href*="userNo="], a[href*="advertiserDetail"]',
+  );
+  if (profileLink) {
+    const uid =
+      /(?:advertiserNo|userNo)=([A-Za-z0-9]{6,64})/.exec(profileLink.href)?.[1] ?? undefined;
+    if (uid) snapshot.counterpartyUid = uid;
+
+    const text = profileLink.textContent?.trim();
+    if (text && text.length <= 64) snapshot.counterpartyNickname = text;
+  }
+
+  if (!snapshot.counterpartyUid) {
+    // Запасной вариант: «UID 421044135» где-нибудь в тексте карточки.
+    const match = /UID[:\s]+([0-9]{6,20})/i.exec(document.body?.innerText?.slice(0, 20_000) ?? '');
+    if (match?.[1]) snapshot.counterpartyUid = match[1];
+  }
+
+  return snapshot.counterpartyUid || snapshot.orderId ? snapshot : null;
+}
+
+let scrapeTimer: number | undefined;
+let lastScrapeJson = '';
+
+function scheduleScrape(): void {
+  window.clearTimeout(scrapeTimer);
+  scrapeTimer = window.setTimeout(() => {
+    const snapshot = scrapeDom();
+    if (!snapshot) return;
+
+    const json = JSON.stringify(snapshot);
+    if (json === lastScrapeJson) return;
+    lastScrapeJson = json;
+
+    void sendMessage({ type: 'DOM_SNAPSHOT', snapshot });
+  }, 800);
+}
+
+/**
+ * Наблюдаем за DOM «дёшево»: слушаем только добавление узлов и всё равно
+ * схлопываем всплеск изменений в один отложенный разбор.
+ */
+function watchDom(): void {
+  const observer = new MutationObserver(() => scheduleScrape());
+  const target = document.body ?? document.documentElement;
+  observer.observe(target, { childList: true, subtree: true });
+  scheduleScrape();
+}
+
+injectPageHook();
+listenPageMessages();
+
+if (document.readyState === 'loading') {
+  document.addEventListener(
+    'DOMContentLoaded',
+    () => {
+      mountPanel();
+      watchDom();
+    },
+    { once: true },
+  );
+} else {
+  mountPanel();
+  watchDom();
+}

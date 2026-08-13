@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <title>P2P Guard</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        width: 340px;
+        background: #14171f;
+        color: #e8ecf3;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+        font-size: 13px;
+      }
+      .wrap { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+      .head { display: flex; align-items: center; gap: 8px; }
+      .logo {
+        width: 26px; height: 26px; border-radius: 7px;
+        display: grid; place-items: center;
+        background: linear-gradient(135deg, #f0b90b, #d99e00);
+        color: #14171f; font-weight: 800; font-size: 12px;
+      }
+      .title { font-weight: 700; }
+      .muted { color: #7d8698; font-size: 12px; }
+      .card {
+        background: #191d27; border: 1px solid #262b36;
+        border-radius: 10px; padding: 10px;
+      }
+      .card-title {
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
+        color: #7d8698; margin-bottom: 8px;
+      }
+      label { display: block; font-size: 11.5px; color: #9aa3b5; margin: 8px 0 4px; }
+      input, select {
+        width: 100%; background: #1c2029; border: 1px solid #2d3341;
+        border-radius: 8px; color: #e8ecf3; padding: 8px 9px;
+        font-size: 12.5px; font-family: inherit;
+      }
+      input:focus, select:focus { outline: 0; border-color: #f0b90b; }
+      button {
+        border: 1px solid #2d3341; background: #1f242f; color: #e8ecf3;
+        border-radius: 8px; padding: 8px 10px; font-size: 12.5px;
+        font-weight: 600; cursor: pointer; font-family: inherit;
+      }
+      button:hover { background: #262b36; }
+      button.primary { background: #f0b90b; border-color: #f0b90b; color: #14171f; }
+      button.primary:hover { background: #ffc51f; }
+      button.ghost { background: transparent; }
+      button:disabled { opacity: .55; cursor: default; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      .tabs { display: flex; gap: 6px; }
+      .tab {
+        flex: 1; padding: 7px; text-align: center; border-radius: 8px;
+        border: 1px solid #2d3341; background: #1c2029; color: #9aa3b5;
+        cursor: pointer; font-size: 12px; font-weight: 600;
+      }
+      .tab.active { border-color: #f0b90b; color: #f0b90b; }
+      .error {
+        background: rgba(240,68,68,.1); border: 1px solid rgba(240,68,68,.35);
+        color: #ff9b9b; border-radius: 8px; padding: 8px 10px; font-size: 12px;
+      }
+      .ok {
+        background: rgba(46,160,67,.1); border: 1px solid rgba(46,160,67,.35);
+        color: #6ee79a; border-radius: 8px; padding: 8px 10px; font-size: 12px;
+      }
+      .switch { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+      .switch input { width: auto; }
+      .kv { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12.5px; }
+      .kv span:first-child { color: #7d8698; }
+      .badge {
+        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; background: #1f242f;
+        border: 1px solid #2d3341; color: #b9c0cf;
+      }
+      .badge.ok { background: rgba(46,160,67,.14); border-color: rgba(46,160,67,.4); color: #6ee79a; }
+      .hint { font-size: 11px; color: #6f7889; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="popup.js"></script>
+  </body>
+</html>

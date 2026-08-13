@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "P2P Guard — досье контрагента Binance P2P",
+  "version": "0.1.0",
+  "description": "Карточка контрагента прямо в ордере Binance P2P: чёрный список, отзывы, статистика сделок и риск-скор.",
+  "default_locale": "ru",
+  "minimum_chrome_version": "114",
+  "permissions": ["storage", "tabs", "alarms", "cookies"],
+  "host_permissions": [
+    "https://p2p.binance.com/*",
+    "https://c2c.binance.com/*",
+    "https://www.binance.com/*",
+    "https://accounts.binance.com/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "P2P Guard",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://p2p.binance.com/*",
+        "https://c2c.binance.com/*",
+        "https://www.binance.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page-hook.js"],
+      "matches": [
+        "https://p2p.binance.com/*",
+        "https://c2c.binance.com/*",
+        "https://www.binance.com/*"
+      ]
+    }
+  ]
+}

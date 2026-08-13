@@ -1,0 +1,380 @@
+// P2P Guard — схема БД.
+// Одна общая база на всех пользователей: контрагенты, отзывы, ЧС, ордера.
+// Приватное для команды (заметки, командный ЧС) отделяется полем teamId.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  TEAM_LEAD
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum Exchange {
+  BINANCE
+  BYBIT
+  HTX
+  OTHER
+}
+
+enum ReviewRating {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum BlacklistScope {
+  GLOBAL
+  TEAM
+}
+
+enum RequisiteType {
+  CARD
+  PHONE
+  ACCOUNT
+  WALLET
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  COMPLETED
+  CANCELLED
+  APPEALING
+  UNKNOWN
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+// ───────────────────────────── Пользователи и команды ─────────────────────────
+
+model User {
+  id           String     @id @default(cuid())
+  binanceUid   String     @unique
+  nickname     String?
+  passwordHash String
+  role         Role       @default(USER)
+  status       UserStatus @default(ACTIVE)
+  blockReason  String?
+
+  teamId String?
+  team   Team?   @relation("TeamMembers", fields: [teamId], references: [id], onDelete: SetNull)
+
+  subscriptionPlan    SubscriptionPlan   @default(FREE)
+  subscriptionStatus  SubscriptionStatus @default(ACTIVE)
+  subscriptionUntil   DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  lastSeenAt DateTime?
+
+  ownedTeams     Team[]          @relation("TeamOwner")
+  reviews        Review[]
+  orders         Order[]
+  refreshTokens  RefreshToken[]
+  createdTokens  InviteToken[]   @relation("InviteTokenCreator")
+  usedTokens     InviteToken[]   @relation("InviteTokenUser")
+  blacklistItems BlacklistEntry[]
+  teamNotes      TeamNote[]
+  templates      MessageTemplate[]
+  auditLogs      AuditLog[]
+
+  @@index([teamId])
+  @@index([status])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  owner     User     @relation("TeamOwner", fields: [ownerId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members        User[]           @relation("TeamMembers")
+  notes          TeamNote[]
+  invites        InviteToken[]
+  blacklistItems BlacklistEntry[]
+  orders         Order[]
+  templates      MessageTemplate[]
+
+  @@index([ownerId])
+}
+
+/// Токен доступа: админ (или тимлид) выдаёт строку, пользователь активирует ей аккаунт.
+/// В БД лежит только sha256-хэш строки.
+model InviteToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  label     String?
+  role      Role     @default(USER)
+
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  maxUses   Int       @default(1)
+  uses      Int       @default(0)
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("InviteTokenCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  usedById String?
+  usedBy   User?   @relation("InviteTokenUser", fields: [usedById], references: [id], onDelete: SetNull)
+  usedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([teamId])
+}
+
+/// Сессия устройства. Ротация: при refresh старый помечается revokedAt и
+/// ссылается на новый через replacedById.
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  familyId  String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  userAgent String?
+  ip        String?
+
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  replacedById String?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+// ───────────────────────────── Контрагенты ────────────────────────────────────
+
+model Counterparty {
+  id          String   @id @default(cuid())
+  exchange    Exchange @default(BINANCE)
+  /// userNo / UID контрагента на бирже
+  externalId  String
+  nickname    String?
+  countryCode String?
+  maskedPhone String?
+  /// Снимок публичной статистики биржи (сделки, completionRate, регистрация и т.д.)
+  exchangeStats  Json?
+  statsUpdatedAt DateTime?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  reviews        Review[]
+  notes          TeamNote[]
+  blacklistItems BlacklistEntry[]
+  orders         Order[]
+  requisites     CounterpartyRequisite[]
+
+  @@unique([exchange, externalId])
+  @@index([nickname])
+}
+
+model Review {
+  id             String       @id @default(cuid())
+  counterpartyId String
+  counterparty   Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  /// Команда автора на момент публикации — чтобы показывать «свой отзыв команды»
+  teamId String?
+
+  rating   ReviewRating
+  text     String       @db.VarChar(2000)
+  orderRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([counterpartyId, authorId])
+  @@index([counterpartyId])
+  @@index([authorId])
+}
+
+/// Приватная заметка команды по контрагенту (одна на команду).
+model TeamNote {
+  id             String       @id @default(cuid())
+  teamId         String
+  team           Team         @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  counterpartyId String
+  counterparty   Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
+
+  text     String  @db.VarChar(2000)
+  authorId String?
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, counterpartyId])
+  @@index([counterpartyId])
+}
+
+model BlacklistEntry {
+  id             String       @id @default(cuid())
+  counterpartyId String
+  counterparty   Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
+
+  scope  BlacklistScope @default(TEAM)
+  teamId String?
+  team   Team?          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  reason String @db.VarChar(1000)
+  /// 1..3 — насколько тяжёлое нарушение
+  severity Int    @default(2)
+  /// Откуда запись: manual | import:<название базы> | moderation
+  source   String @default("manual")
+
+  createdById String?
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  @@index([counterpartyId])
+  @@index([teamId])
+  @@index([scope])
+}
+
+// ───────────────────────────── Реквизиты ──────────────────────────────────────
+
+model Requisite {
+  id    String        @id @default(cuid())
+  type  RequisiteType
+  /// Нормализованное значение (только цифры)
+  value String
+  /// Как показываем в UI: 4276••••1234
+  mask  String
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  counterparties CounterpartyRequisite[]
+
+  @@unique([type, value])
+  @@index([value])
+}
+
+model CounterpartyRequisite {
+  counterpartyId String
+  counterparty   Counterparty @relation(fields: [counterpartyId], references: [id], onDelete: Cascade)
+  requisiteId    String
+  requisite      Requisite    @relation(fields: [requisiteId], references: [id], onDelete: Cascade)
+
+  timesSeen   Int      @default(1)
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  @@id([counterpartyId, requisiteId])
+  @@index([requisiteId])
+}
+
+// ───────────────────────────── Ордера ─────────────────────────────────────────
+
+model Order {
+  id         String   @id @default(cuid())
+  exchange   Exchange @default(BINANCE)
+  externalId String
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId String?
+  team   Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
+
+  counterpartyId String?
+  counterparty   Counterparty? @relation(fields: [counterpartyId], references: [id], onDelete: SetNull)
+
+  side   OrderSide
+  status OrderStatus @default(UNKNOWN)
+
+  asset      String?
+  fiat       String?
+  amountFiat Decimal? @db.Decimal(20, 2)
+  amountAsset Decimal? @db.Decimal(28, 8)
+  price      Decimal? @db.Decimal(20, 4)
+
+  createdAtExchange DateTime?
+  completedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([exchange, externalId])
+  @@index([userId])
+  @@index([teamId])
+  @@index([counterpartyId])
+  @@index([status])
+}
+
+// ───────────────────────────── Прочее ─────────────────────────────────────────
+
+model MessageTemplate {
+  id     String  @id @default(cuid())
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  teamId String?
+  team   Team?   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  title    String @db.VarChar(120)
+  body     String @db.VarChar(2000)
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([teamId])
+}
+
+model AuditLog {
+  id      String  @id @default(cuid())
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  action     String
+  targetType String?
+  targetId   String?
+  meta       Json?
+  ip         String?
+
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([action])
+  @@index([createdAt])
+}
