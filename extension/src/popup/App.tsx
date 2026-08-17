@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { sendMessage } from '../shared/messages.js';
 import {
   IconAlert,
-  IconArrowLeft,
   IconCheck,
   IconCopy,
   IconInfo,
@@ -10,8 +9,8 @@ import {
   IconNote,
   IconPlus,
   IconRefresh,
-  IconSearch,
   IconSettings,
+  IconStar,
   IconTrash,
   IconUser,
   IconUsers,
@@ -19,14 +18,14 @@ import {
 } from '../shared/icons.js';
 import { clearPopupState, loadPopupState, savePopupState, type PopupTab } from './state.js';
 import { fmtDate, fmtMoney, fmtNumber, initialOf } from '../shared/format.js';
-import { DossierView, type DossierActions } from '../ui/dossier.js';
-import type {
-  Dossier,
-  MessageTemplate,
-  ReviewRating,
-  ReviewTag,
-  Session,
-  Settings,
+import {
+  REVIEW_TAG_LABEL,
+  REVIEW_TAG_ORDER,
+  type MessageTemplate,
+  type ReviewRating,
+  type ReviewTag,
+  type Session,
+  type Settings,
 } from '../shared/types.js';
 
 type SessionResponse = { session: Session | null; settings: Settings };
@@ -48,18 +47,37 @@ type BinanceSessionData = {
 type Tab = PopupTab;
 
 const TABS: { key: Tab; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
-  { key: 'check', label: 'Проверка', Icon: IconSearch },
-  { key: 'team', label: 'Команда', Icon: IconUsers },
-  { key: 'templates', label: 'Шаблоны', Icon: IconNote },
+  { key: 'review', label: 'Оценить', Icon: IconStar },
   { key: 'settings', label: 'Настройки', Icon: IconSettings },
 ];
+
+type RecentItem = {
+  counterparty: { id: string; externalId: string; nickname: string | null; countryCode: string | null };
+  lastOrder: {
+    externalId: string;
+    side: 'BUY' | 'SELL';
+    status: string;
+    fiat: string | null;
+    amountFiat: number | null;
+    createdAt: string;
+  };
+  myReview: { id: string; rating: ReviewRating; tag: ReviewTag; text: string; updatedAt: string } | null;
+};
+
+type MyReview = {
+  id: string;
+  rating: ReviewRating;
+  tag: ReviewTag;
+  text: string;
+  updatedAt: string;
+  counterparty: { id: string; externalId: string; nickname: string | null };
+};
 
 export function App() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [tab, setTabState] = useState<Tab>('check');
-  const [restored, setRestored] = useState<{ query: string; dossier: Dossier | null } | null>(null);
+  const [tab, setTabState] = useState<Tab>('review');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -81,10 +99,7 @@ export function App() {
 
   useEffect(() => {
     // параллельно: попап должен открываться сразу, а не в два ожидания
-    void Promise.all([reload(), loadPopupState()]).then(([, saved]) => {
-      setTabState(saved.tab);
-      setRestored({ query: saved.query, dossier: saved.dossier });
-    });
+    void Promise.all([reload(), loadPopupState()]).then(([, saved]) => setTabState(saved.tab));
   }, [reload]);
 
   // попап — обычная страница, Shadow DOM тут нет, тема живёт на <html>
@@ -151,7 +166,7 @@ export function App() {
           </div>
         ) : null}
 
-        {tab === 'check' ? (
+        {tab === 'review' ? (
           <>
             <BinanceSessionCard
               accountUid={session.user.binanceUid}
@@ -164,18 +179,9 @@ export function App() {
                 setNotice('Панель включена. Обновите страницу ордера.');
               }}
             />
-            <CheckTab
-              session={session}
-              onError={setError}
-              initialQuery={restored?.query ?? ''}
-              initialDossier={restored?.dossier ?? null}
-            />
+            <ReviewTab onError={setError} onNotice={setNotice} />
           </>
         ) : null}
-        {tab === 'team' ? (
-          <TeamTab session={session} onError={setError} onNotice={setNotice} onReload={reload} />
-        ) : null}
-        {tab === 'templates' ? <TemplatesTab onError={setError} onNotice={setNotice} /> : null}
         {tab === 'settings' ? (
           <SettingsTab
             session={session}
@@ -183,11 +189,11 @@ export function App() {
             onSettings={patchSettings}
             onError={setError}
             onNotice={setNotice}
+            onReloadSession={reload}
             onLogout={async () => {
               await sendMessage({ type: 'AUTH_LOGOUT' });
-              // кэш привязан к аккаунту, чужое досье показывать нельзя
+              // кэш привязан к аккаунту, чужие данные показывать нельзя
               await clearPopupState();
-              setRestored({ query: '', dossier: null });
               setSession(null);
               setNotice('Вы вышли из аккаунта');
             }}
@@ -492,210 +498,239 @@ function AuthForm({
   );
 }
 
-// ───────────────────────────── Проверка контрагента ─────────────────────────────
 
-type SearchItem = {
-  id: string;
-  externalId: string;
-  nickname: string | null;
-  countryCode: string | null;
-  reviews: number;
-  orders: number;
-  blacklisted: boolean;
-};
+// ───────────────────────────── Оценить контрагента ─────────────────────────────
 
-// проверка до сделки: по UID, нику или номеру карты
-function CheckTab({
-  session,
+// главный экран попапа: оценить того, с кем только что закрыл ордер
+function ReviewTab({
   onError,
-  initialQuery,
-  initialDossier,
+  onNotice,
 }: {
-  session: Session;
   onError: (m: string) => void;
-  initialQuery: string;
-  initialDossier: Dossier | null;
+  onNotice: (m: string) => void;
 }) {
-  const [query, setQuery] = useState(initialQuery);
-  const [items, setItems] = useState<SearchItem[] | null>(null);
-  const [dossier, setDossierState] = useState<Dossier | null>(initialDossier);
+  const [recent, setRecent] = useState<RecentItem[] | null>(null);
+  const [mine, setMine] = useState<MyReview[] | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // любая смена карточки сразу уходит в кэш попапа
-  const setDossier = useCallback((next: Dossier | null) => {
-    setDossierState(next);
-    savePopupState({ dossier: next });
-  }, []);
+  const load = useCallback(async () => {
+    const [r, m] = await Promise.all([
+      sendMessage<{ items: RecentItem[] }>({ type: 'GET_RECENT_COUNTERPARTIES' }),
+      sendMessage<{ items: MyReview[] }>({ type: 'GET_MY_REVIEWS' }),
+    ]);
+    if (r.ok) setRecent(r.data.items);
+    else onError(r.error.message);
+    if (m.ok) setMine(m.data.items);
+  }, [onError]);
 
-  // восстановленное досье могло устареть, обновляем фоном
   useEffect(() => {
-    if (!initialDossier) return;
-    void sendMessage<Dossier>({
-      type: 'GET_DOSSIER',
-      counterpartyId: initialDossier.counterparty.id,
-    }).then((r) => {
-      if (r.ok) setDossier(r.data);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void load();
+  }, [load]);
 
-  const search = async () => {
-    const value = query.trim();
-    if (value.length < 2) return;
-
-    savePopupState({ query: value });
-    setBusy(true);
-    setDossier(null);
-
-    // чистый UID ведёт прямо в досье, без лишнего круга через поиск
-    if (/^\d{5,}$/.test(value)) {
-      setItems(null);
-      await lookupByUid(value);
-      return;
-    }
-
-    const response = await sendMessage<{ items: SearchItem[] }>({
-      type: 'SEARCH_COUNTERPARTIES',
-      query: value,
-    });
-    setBusy(false);
-
-    if (!response.ok) {
-      onError(response.error.message);
-      return;
-    }
-    setItems(response.data.items);
-  };
-
-  const lookupByUid = async (uid: string) => {
-    setBusy(true);
-    const response = await sendMessage<Dossier>({ type: 'LOOKUP_COUNTERPARTY', uid });
-    setBusy(false);
-    if (!response.ok) {
-      onError(response.error.message);
-      return;
-    }
-    setDossier(response.data);
-  };
-
-  const open = async (id: string) => {
-    setBusy(true);
-    const response = await sendMessage<Dossier>({ type: 'GET_DOSSIER', counterpartyId: id });
-    setBusy(false);
-    if (!response.ok) {
-      onError(response.error.message);
-      return;
-    }
-    setDossier(response.data);
-  };
-
-  const refresh = async () => {
-    if (dossier) await open(dossier.counterparty.id);
-  };
-
-  const actions: DossierActions = {
-    busy,
-    isAdmin: session.user.role === 'ADMIN',
-    hasTeam: Boolean(session.user.teamId),
-    onReview: (rating: ReviewRating, tag: ReviewTag, text: string) => {
-      if (!dossier) return;
-      void sendMessage({
-        type: 'SUBMIT_REVIEW',
-        counterpartyId: dossier.counterparty.id,
-        rating,
-        tag,
-        text,
-      }).then(refresh);
-    },
-    onDeleteReview: (reviewId) => void sendMessage({ type: 'DELETE_REVIEW', reviewId }).then(refresh),
-    onTeamNote: (text) => {
-      if (!dossier) return;
-      void sendMessage({ type: 'SAVE_TEAM_NOTE', counterpartyId: dossier.counterparty.id, text }).then(refresh);
-    },
-    onBlacklist: (reason, severity, scope) => {
-      if (!dossier) return;
-      void sendMessage({
-        type: 'ADD_BLACKLIST',
-        counterpartyId: dossier.counterparty.id,
-        reason,
-        severity,
-        scope,
-      }).then(refresh);
-    },
-    onRevokeBlacklist: (entryId) => void sendMessage({ type: 'REVOKE_BLACKLIST', entryId }).then(refresh),
-  };
-
-  if (dossier) {
+  if (!recent) {
     return (
-      <>
-        <div className="actions">
-          <button className="btn ghost small" onClick={() => setDossier(null)}>
-            <IconArrowLeft size={14} /> К поиску
-          </button>
-          <div style={{ flex: 1 }} />
-          <button className="btn ghost small" disabled={busy} onClick={() => void refresh()}>
-            <IconRefresh size={14} />
-          </button>
-        </div>
-        <DossierView dossier={dossier} actions={actions} />
-      </>
+      <div className="center">
+        <div className="spinner" />
+        <div className="muted">Загружаем…</div>
+      </div>
     );
   }
 
+  const picked = recent.find((r) => r.counterparty.id === pickedId) ?? recent[0] ?? null;
+
   return (
     <>
-      <div className="card">
-        <div className="card-title">Проверить контрагента</div>
-        <div className="row">
-          <input
-            autoFocus
-            placeholder="UID, ник или номер карты"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && void search()}
+      {picked ? (
+        <>
+          {recent.length > 1 ? (
+            <div className="card">
+              <div className="card-title">Последние сделки</div>
+              <div className="templates">
+                {recent.map((item) => (
+                  <button
+                    key={item.counterparty.id}
+                    className={`template-chip ${item.counterparty.id === picked.counterparty.id ? 'active' : ''}`}
+                    onClick={() => setPickedId(item.counterparty.id)}
+                  >
+                    {item.counterparty.nickname ?? item.counterparty.externalId}
+                    {item.myReview ? ' ✓' : ''}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <QuickReview
+            key={picked.counterparty.id}
+            item={picked}
+            busy={busy}
+            setBusy={setBusy}
+            onDone={async (message) => {
+              onNotice(message);
+              await load();
+            }}
+            onError={onError}
           />
-          <button className="btn primary fixed" disabled={busy || query.trim().length < 2} onClick={() => void search()}>
-            {busy ? '…' : 'Найти'}
-          </button>
+        </>
+      ) : (
+        <div className="card">
+          <div className="card-title">
+            <IconStar size={13} /> Пока некого оценивать
+          </div>
+          <div className="hint">
+            Здесь появятся контрагенты, с которыми у вас были сделки. Полное досье и проверка до
+            сделки — в панели на странице ордера.
+          </div>
+        </div>
+      )}
+
+      <MyReviews items={mine} />
+    </>
+  );
+}
+
+// форма оценки: рейтинг, категория, текст
+function QuickReview({
+  item,
+  busy,
+  setBusy,
+  onDone,
+  onError,
+}: {
+  item: RecentItem;
+  busy: boolean;
+  setBusy: (v: boolean) => void;
+  onDone: (message: string) => Promise<void>;
+  onError: (m: string) => void;
+}) {
+  const own = item.myReview;
+  const [rating, setRating] = useState<ReviewRating>(own?.rating ?? 'POSITIVE');
+  const [tag, setTag] = useState<ReviewTag>(own?.tag ?? 'COMMENT');
+  const [text, setText] = useState(own?.text ?? '');
+
+  // положительный отзыв обвинением быть не может
+  useEffect(() => {
+    if (rating === 'POSITIVE') setTag('COMMENT');
+  }, [rating]);
+
+  const submit = async () => {
+    setBusy(true);
+    const response = await sendMessage({
+      type: 'SUBMIT_REVIEW',
+      counterpartyId: item.counterparty.id,
+      rating,
+      tag,
+      text: text.trim(),
+    });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    await onDone(own ? 'Отзыв обновлён' : 'Отзыв опубликован');
+  };
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        <IconStar size={13} /> {own ? 'Ваш отзыв' : 'Оценить контрагента'}
+      </div>
+
+      <div className="who" style={{ marginBottom: 10 }}>
+        <div className="avatar">
+          <span className="initial">
+            {initialOf(item.counterparty.nickname, item.counterparty.externalId)}
+          </span>
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="nick">{item.counterparty.nickname ?? 'без ника'}</div>
+          <div className="uid">
+            UID {item.counterparty.externalId}
+            {item.counterparty.countryCode ? ` · ${item.counterparty.countryCode}` : ''}
+          </div>
+          <div className="hint" style={{ marginTop: 3 }}>
+            {item.lastOrder.side === 'BUY' ? 'покупка' : 'продажа'}
+            {item.lastOrder.amountFiat
+              ? ` ${fmtNumber(item.lastOrder.amountFiat)} ${item.lastOrder.fiat ?? ''}`
+              : ''}
+            {' · '}
+            {fmtDate(item.lastOrder.createdAt)}
+          </div>
         </div>
       </div>
 
-      {items?.length ? (
-        <div className="card">
-          <div className="card-title">
-            Найдено <span className="count">{items.length}</span>
-          </div>
-          {items.map((item) => (
-            <button key={item.id} className="result" onClick={() => void open(item.id)}>
-              <div className="avatar">
-                <span className="initial">{initialOf(item.nickname, item.externalId)}</span>
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="n">{item.nickname ?? 'без ника'}</div>
-                <div className="s mono">
-                  UID {item.externalId}
-                  {item.countryCode ? ` · ${item.countryCode}` : ''}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <span className={`badge ${item.blacklisted ? 'bad' : 'ok'}`}>
-                  {item.blacklisted ? 'в ЧС' : 'чисто'}
-                </span>
-                <div className="s">
-                  отзывов {item.reviews} · сделок {item.orders}
-                </div>
-              </div>
+      <div className="rating-row">
+        {(['POSITIVE', 'NEUTRAL', 'NEGATIVE'] as ReviewRating[]).map((r) => (
+          <button
+            key={r}
+            className={`rating-btn ${r} ${rating === r ? 'active' : ''}`}
+            onClick={() => setRating(r)}
+          >
+            {r === 'POSITIVE' ? 'Хорошо' : r === 'NEUTRAL' ? 'Нейтрально' : 'Плохо'}
+          </button>
+        ))}
+      </div>
+
+      {rating !== 'POSITIVE' ? (
+        <div className="tag-picker">
+          {REVIEW_TAG_ORDER.map((t) => (
+            <button
+              key={t}
+              className={`tag-opt ${tag === t ? 'active' : ''} ${t === 'COMMENT' ? 'neutral' : ''}`}
+              onClick={() => setTag(t)}
+            >
+              {REVIEW_TAG_LABEL[t]}
             </button>
           ))}
         </div>
-      ) : items ? (
-        <div className="card">
-          <div className="muted">
-            В базе никого не нашлось — этот контрагент нам ещё не встречался.
-          </div>
-        </div>
       ) : null}
-    </>
+
+      <textarea
+        rows={3}
+        value={text}
+        placeholder="Что произошло? Отзыв увидят все пользователи P2P Guard"
+        onChange={(e) => setText(e.target.value)}
+      />
+
+      <button
+        className="btn primary block"
+        style={{ marginTop: 9 }}
+        disabled={busy || text.trim().length < 3}
+        onClick={() => void submit()}
+      >
+        {own ? 'Обновить отзыв' : 'Опубликовать'}
+      </button>
+    </div>
+  );
+}
+
+// мои отзывы списком
+function MyReviews({ items }: { items: MyReview[] | null }) {
+  if (!items?.length) return null;
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Мои отзывы <span className="count">{items.length}</span>
+      </div>
+      {items.slice(0, 20).map((r) => (
+        <div className="review" key={r.id}>
+          <div className="review-head">
+            <span className={`dot ${r.rating}`} />
+            <span className="review-author">
+              {r.counterparty.nickname ?? r.counterparty.externalId}
+            </span>
+            {r.tag !== 'COMMENT' ? (
+              <span className="badge warn">{REVIEW_TAG_LABEL[r.tag]}</span>
+            ) : null}
+            <span style={{ flex: 1 }} />
+            <span>{fmtDate(r.updatedAt)}</span>
+          </div>
+          <div className="review-text">{r.text}</div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1119,6 +1154,7 @@ function SettingsTab({
   onError,
   onNotice,
   onLogout,
+  onReloadSession,
 }: {
   session: Session;
   settings: Settings | null;
@@ -1126,6 +1162,7 @@ function SettingsTab({
   onError: (m: string) => void;
   onNotice: (m: string) => void;
   onLogout: () => Promise<void>;
+  onReloadSession: () => Promise<void>;
 }) {
   const [syncing, setSyncing] = useState(false);
   const [apiUrl, setApiUrl] = useState(settings?.apiBaseUrl ?? '');
@@ -1238,6 +1275,26 @@ function SettingsTab({
       <button className="btn block" disabled={syncing} onClick={() => void sync()}>
         <IconRefresh size={14} /> {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
       </button>
+
+      {/* команда и шаблоны — редкие операции, поэтому свёрнуты: главный экран
+          попапа занят тем, что нужно после каждой сделки */}
+      <details className="advanced">
+        <summary>
+          <IconUsers size={13} /> Команда
+        </summary>
+        <div style={{ marginTop: 8 }}>
+          <TeamTab session={session} onError={onError} onNotice={onNotice} onReload={onReloadSession} />
+        </div>
+      </details>
+
+      <details className="advanced">
+        <summary>
+          <IconNote size={13} /> Шаблоны быстрых ответов
+        </summary>
+        <div style={{ marginTop: 8 }}>
+          <TemplatesTab onError={onError} onNotice={onNotice} />
+        </div>
+      </details>
 
       {/* Адрес сервера рядовому пользователю менять незачем: общая база отзывов
           и ЧС живёт на одном адресе для всех. Прячем и объясняем, что это. */}

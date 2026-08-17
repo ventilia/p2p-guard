@@ -4,7 +4,9 @@ import type { Dossier } from '../shared/types.js';
 
 const KEY = 'pg.popup.state';
 
-export type PopupTab = 'check' | 'team' | 'templates' | 'settings';
+// попап держит только самое частое: оценить контрагента и настройки
+// разбор досье, команда и шаблоны живут в панели ордера
+export type PopupTab = 'review' | 'settings';
 
 export type PopupState = {
   tab: PopupTab;
@@ -13,7 +15,7 @@ export type PopupState = {
   savedAt: number;
 };
 
-const EMPTY: PopupState = { tab: 'check', query: '', dossier: null, savedAt: 0 };
+const EMPTY: PopupState = { tab: 'review', query: '', dossier: null, savedAt: 0 };
 
 // полчаса: дальше показывать «как было» уже вводит в заблуждение
 const MAX_AGE_MS = 30 * 60_000;

@@ -228,6 +228,12 @@ async function handle(request: Record<string, unknown>): Promise<unknown> {
     case 'CREATE_TEAM_INVITE':
       return { ok: true, data: { token: 'DEMOxKq7Rt2Fv9LmPz4WbN8sYc1JhTgE' } };
 
+    case 'GET_RECENT_COUNTERPARTIES':
+      return { ok: true, data: { items: structuredClone(fixture.recentCounterparties) } };
+
+    case 'GET_MY_REVIEWS':
+      return { ok: true, data: { items: structuredClone(fixture.myReviews) } };
+
     case 'GET_TEMPLATES':
       return { ok: true, data: { items: templates } };
 

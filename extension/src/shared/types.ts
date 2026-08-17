@@ -61,6 +61,17 @@ export const REVIEW_TAG_LABEL: Record<ReviewTag, string> = {
   COMMENT: 'Комментарий',
 };
 
+// порядок в выборе категории: тяжёлое сверху, комментарий последним
+export const REVIEW_TAG_ORDER: ReviewTag[] = [
+  'SCAM',
+  'FREEZE',
+  'DIRTY',
+  'PAINTER',
+  'TERMS',
+  'RUDE',
+  'COMMENT',
+];
+
 export type OrderSnapshot = {
   externalId: string;
   side: OrderSide;

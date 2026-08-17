@@ -717,6 +717,12 @@ async function handleMessage(
       return { ok: true, data: null };
     }
 
+    case 'GET_RECENT_COUNTERPARTIES':
+      return { ok: true, data: await apiRequest('/me/recent-counterparties?limit=5') };
+
+    case 'GET_MY_REVIEWS':
+      return { ok: true, data: await apiRequest('/reviews/mine?limit=50') };
+
     // досье из попапа: ордера нет, поэтому находим по UID и обогащаем профилем
     case 'LOOKUP_COUNTERPARTY': {
       let snapshot: CounterpartySnapshot = { externalId: request.uid };

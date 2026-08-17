@@ -491,7 +491,61 @@ const searchItems = [
   { id: 'cp-demo-3', externalId: '100975212', nickname: 'sdwrus', countryCode: 'LKA', reviews: 2, orders: 8, blacklisted: true },
 ];
 
+const recentCounterparties = [
+  {
+    counterparty: { id: 'cp-demo-scam', externalId: '421044135', nickname: 'aminexh', countryCode: 'MAR' },
+    lastOrder: {
+      externalId: '20260814000486',
+      side: 'BUY' as const,
+      status: 'CANCELLED',
+      fiat: 'RUB',
+      amountFiat: 180000,
+      createdAt: hoursAgo(3),
+    },
+    myReview: null,
+  },
+  {
+    counterparty: { id: 'cp-demo-clean', externalId: '530537036', nickname: 'Lev207', countryCode: 'RUS' },
+    lastOrder: {
+      externalId: '20260814000221',
+      side: 'BUY' as const,
+      status: 'COMPLETED',
+      fiat: 'RUB',
+      amountFiat: 15003,
+      createdAt: daysAgo(2),
+    },
+    myReview: {
+      id: 'rv-c1',
+      rating: 'POSITIVE' as const,
+      tag: 'COMMENT' as const,
+      text: 'Отпустил за минуту, всё чётко. Работаем регулярно.',
+      updatedAt: daysAgo(1),
+    },
+  },
+];
+
+const myReviews = [
+  {
+    id: 'rv-c1',
+    rating: 'POSITIVE' as const,
+    tag: 'COMMENT' as const,
+    text: 'Отпустил за минуту, всё чётко. Работаем регулярно.',
+    updatedAt: daysAgo(1),
+    counterparty: { id: 'cp-demo-clean', externalId: '530537036', nickname: 'Lev207' },
+  },
+  {
+    id: 'rv-old-1',
+    rating: 'NEGATIVE' as const,
+    tag: 'FREEZE' as const,
+    text: 'Держал ордер два часа, отпустил только после апелляции.',
+    updatedAt: daysAgo(14),
+    counterparty: { id: 'cp-3', externalId: '100975212', nickname: 'sdwrus' },
+  },
+];
+
 export const fixture = {
+  recentCounterparties,
+  myReviews,
   panelState: scamPanelState,
   cleanPanelState,
   session,

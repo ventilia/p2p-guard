@@ -164,4 +164,61 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       })),
     };
   });
+
+  /**
+   * С кем я недавно торговал — главный экран попапа.
+   *
+   * Отдаём вместе с моим отзывом на каждого: попап должен открываться одним
+   * запросом и сразу показывать, кого ещё не оценил.
+   */
+  app.get('/me/recent-counterparties', auth, async (req) => {
+    const { limit } = z
+      .object({ limit: z.coerce.number().int().min(1).max(20).default(5) })
+      .parse(req.query);
+    const userId = req.auth!.user.id;
+
+    // берём ордера с запасом: у одного контрагента их может быть много подряд
+    const orders = await prisma.order.findMany({
+      where: { userId, counterpartyId: { not: null } },
+      orderBy: [{ createdAtExchange: 'desc' }, { createdAt: 'desc' }],
+      take: limit * 6,
+      include: {
+        counterparty: {
+          select: { id: true, externalId: true, nickname: true, countryCode: true },
+        },
+      },
+    });
+
+    const seen = new Set<string>();
+    const recent = [];
+    for (const order of orders) {
+      if (!order.counterparty || seen.has(order.counterparty.id)) continue;
+      seen.add(order.counterparty.id);
+      recent.push(order);
+      if (recent.length >= limit) break;
+    }
+
+    if (!recent.length) return { items: [] };
+
+    const myReviews = await prisma.review.findMany({
+      where: { authorId: userId, counterpartyId: { in: recent.map((o) => o.counterparty!.id) } },
+      select: { id: true, counterpartyId: true, rating: true, tag: true, text: true, updatedAt: true },
+    });
+    const reviewByCounterparty = new Map(myReviews.map((r) => [r.counterpartyId, r]));
+
+    return {
+      items: recent.map((order) => ({
+        counterparty: order.counterparty,
+        lastOrder: {
+          externalId: order.externalId,
+          side: order.side,
+          status: order.status,
+          fiat: order.fiat,
+          amountFiat: order.amountFiat ? Number(order.amountFiat) : null,
+          createdAt: order.createdAtExchange ?? order.createdAt,
+        },
+        myReview: reviewByCounterparty.get(order.counterparty!.id) ?? null,
+      })),
+    };
+  });
 }

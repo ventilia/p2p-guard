@@ -57,6 +57,9 @@ export type RuntimeRequest =
   | { type: 'GET_BINANCE_SESSION' }
   // открыть настоящую страницу входа Binance
   | { type: 'OPEN_BINANCE_LOGIN' }
+  // главный экран попапа: с кем недавно торговал и мои отзывы
+  | { type: 'GET_RECENT_COUNTERPARTIES' }
+  | { type: 'GET_MY_REVIEWS' }
   // досье из попапа, вне контекста ордера
   | { type: 'LOOKUP_COUNTERPARTY'; uid: string }
   | { type: 'GET_DOSSIER'; counterpartyId: string }
