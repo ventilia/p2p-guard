@@ -146,8 +146,11 @@
 ## 7. Запуск
 
 ```bash
-docker compose up -d                                   # postgres
+docker compose up -d                                   # postgres на localhost:5435
 cd backend   && npm i && npm run db:push && npm run seed && npm run dev
-cd admin     && npm i && npm run dev
+cd admin     && npm i && npm run dev      # http://127.0.0.1:5174
 cd extension && npm i && npm run build   # chrome://extensions → «Загрузить распакованное» → extension/dist
+
+# посмотреть интерфейс расширения без биржи и без бэкенда:
+cd extension && npm run preview           # → preview/dist/index.html
 ```

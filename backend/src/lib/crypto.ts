@@ -15,7 +15,7 @@ const scrypt = promisify(scryptCb) as (
 
 const KEY_LEN = 64;
 
-/** scrypt из stdlib — без нативных зависимостей, собирается везде. */
+// scrypt из stdlib, без нативных зависимостей — собирается везде
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16);
   const key = await scrypt(password, salt, KEY_LEN);
@@ -36,15 +36,14 @@ export async function verifyPassword(password: string, stored: string): Promise<
 
 export const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
-/** Случайный токен для инвайтов и refresh-сессий. */
 export const randomToken = (bytes = 32) => randomBytes(bytes).toString('base64url');
 
 export const newId = () => randomUUID();
 
-/** Только цифры — под сравнение карт и телефонов. */
+// только цифры, чтобы сравнивать карты и телефоны в любом написании
 export const normalizeDigits = (value: string) => value.replace(/\D+/g, '');
 
-/** 4276123412341234 → 4276••••1234, +79161234567 → +7916•••4567 */
+// 4276123412341234 → 4276••••1234, +79161234567 → +7916•••4567
 export function maskRequisite(digits: string): string {
   if (digits.length <= 4) return '•'.repeat(digits.length);
   const head = digits.slice(0, Math.min(4, digits.length - 4));
@@ -52,7 +51,7 @@ export function maskRequisite(digits: string): string {
   return `${head}${'•'.repeat(Math.max(3, digits.length - head.length - 4))}${tail}`;
 }
 
-/** UID контрагента в UI показываем как «•••221» — как в аналоге. */
+// автора отзыва не раскрываем, показываем хвост UID
 export function maskUid(uid: string): string {
   if (uid.length <= 3) return `•••${uid}`;
   return `•••${uid.slice(-3)}`;

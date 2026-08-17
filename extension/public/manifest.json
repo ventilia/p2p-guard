@@ -3,7 +3,6 @@
   "name": "P2P Guard — досье контрагента Binance P2P",
   "version": "0.1.0",
   "description": "Карточка контрагента прямо в ордере Binance P2P: чёрный список, отзывы, статистика сделок и риск-скор.",
-  "default_locale": "ru",
   "minimum_chrome_version": "114",
   "permissions": ["storage", "tabs", "alarms", "cookies"],
   "host_permissions": [
@@ -45,7 +44,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["page-hook.js"],
+      "resources": ["page-hook.js", "fonts/IBMPlexSans.ttf"],
       "matches": [
         "https://p2p.binance.com/*",
         "https://c2c.binance.com/*",

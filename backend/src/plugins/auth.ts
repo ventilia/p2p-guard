@@ -41,10 +41,7 @@ declare module '@fastify/jwt' {
   }
 }
 
-/**
- * Регистрируем прямым вызовом из app.ts (без fastify-plugin), чтобы декораторы
- * попали в корневой инстанс и были видны во всех роутерах.
- */
+// без fastify-plugin: так декораторы попадают в корневой инстанс и видны везде
 export async function registerAuth(app: FastifyInstance): Promise<void> {
   await app.register(fastifyJwt, {
     secret: env.JWT_SECRET,
@@ -69,7 +66,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       throw forbidden(user.blockReason || 'Аккаунт заблокирован', 'USER_BLOCKED');
     }
 
-    // Привязка учётки к аккаунту биржи: одна лицензия — один UID.
+    // одна учётка — один UID биржи
     const headerUid = req.headers['x-binance-uid'];
     if (typeof headerUid === 'string' && headerUid && headerUid !== user.binanceUid) {
       throw conflict(
@@ -85,7 +82,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       isAdmin: user.role === Role.ADMIN,
     };
 
-    // lastSeenAt обновляем не чаще раза в 5 минут, чтобы не писать в БД на каждый запрос.
+    // не чаще раза в 5 минут, чтобы не писать в БД на каждый запрос
     const stale = !user.lastSeenAt || Date.now() - user.lastSeenAt.getTime() > 5 * 60_000;
     if (stale) {
       void prisma.user

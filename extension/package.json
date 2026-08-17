@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:prod": "node scripts/build.mjs --prod",
     "watch": "node scripts/build.mjs --watch",
+    "preview": "node scripts/preview.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },

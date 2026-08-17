@@ -1,14 +1,5 @@
-/**
- * Сбор контекста ордера из нескольких источников.
- *
- * Приоритет:
- *   1) перехват сетевых ответов самой страницы (самый надёжный — не зависит
- *      от того, как сегодня называются эндпоинты);
- *   2) собственный запрос к приватному API (если страница взяла данные из кэша);
- *   3) разбор DOM (ник и UID видны на странице).
- *
- * Возвращаем ещё и `source`, чтобы в панели было честно видно, откуда данные.
- */
+// контекст ордера по приоритету: перехват, свой запрос, разбор DOM
+// source отдаём наружу, чтобы в панели было видно, откуда взялись данные
 import {
   BinanceApiError,
   extractFromPayload,
@@ -28,9 +19,9 @@ export type OrderContext = {
 };
 
 type TabCapture = {
-  /** Ордера, увиденные в перехвате: ключ — номер ордера. */
+  // ордера из перехвата, ключ — номер ордера
   orders: Map<string, { order: OrderSnapshot; counterparty: CounterpartySnapshot | null }>;
-  /** Профили пользователей: ключ — userNo. */
+  // профили пользователей, ключ — userNo
   users: Map<string, CounterpartySnapshot>;
   dom: DomSnapshot | null;
   selfHint: string | null;
@@ -39,7 +30,7 @@ type TabCapture = {
 
 const captures = new Map<number, TabCapture>();
 
-/** Ожидающие перехвата: разрешаются, как только нужный ордер появится. */
+// разрешаются, как только нужный ордер появится в перехвате
 const waiters = new Map<number, { orderId: string; resolve: () => void }[]>();
 
 const CAPTURE_TTL_MS = 10 * 60_000;
@@ -64,7 +55,7 @@ export function clearCapture(tabId: number): void {
   waiters.delete(tabId);
 }
 
-/** Пришёл перехваченный ответ страницы — раскладываем по полочкам. */
+// пришёл перехваченный ответ страницы, раскладываем по полочкам
 export function recordNetworkCapture(
   tabId: number,
   payload: unknown,
@@ -104,7 +95,7 @@ export function recordNetworkCapture(
   }
 }
 
-/** Снимок DOM от content script — запасной источник. */
+// снимок DOM от content script, запасной источник
 export function recordDomSnapshot(tabId: number, snapshot: DomSnapshot): void {
   const capture = getCapture(tabId);
   capture.dom = snapshot;
@@ -130,7 +121,7 @@ function waitForCapture(tabId: number, orderId: string, timeoutMs: number): Prom
   });
 }
 
-/** Догружает статистику профиля, если её ещё нет. */
+// догружает статистику профиля, если её ещё нет
 async function enrich(
   tabId: number,
   counterparty: CounterpartySnapshot,
@@ -150,7 +141,7 @@ async function enrich(
   const hasStats = result.stats && Object.values(result.stats).some((v) => v !== null && v !== undefined);
   if (hasStats) return result;
 
-  // Профиль в перехвате не встретился — спросим сами. Не критично, если не выйдет.
+  // профиль в перехвате не встретился, спросим сами
   try {
     const raw = await fetchUserDetail(result.externalId);
     const detail = raw ? normalizeUserDetail(raw) : null;
@@ -170,10 +161,7 @@ async function enrich(
   return result;
 }
 
-/**
- * Главный резолвер. Ждёт перехват и параллельно пробует API — берём то,
- * что сработало раньше.
- */
+// ждём перехват и параллельно пробуем API, берём что сработало раньше
 export async function resolveOrderContext(
   tabId: number,
   orderId: string,
@@ -183,7 +171,7 @@ export async function resolveOrderContext(
   const waitMs = options.waitMs ?? 3500;
   const capture = getCapture(tabId);
 
-  // 1. Уже перехвачено.
+  // уже перехвачено
   const cached = capture.orders.get(orderId);
   if (cached?.counterparty) {
     return {
@@ -193,7 +181,7 @@ export async function resolveOrderContext(
     };
   }
 
-  // 2. Гонка: ждём перехват и одновременно спрашиваем API сами.
+  // гонка: ждём перехват и одновременно спрашиваем API сами
   let apiError: unknown = null;
   const apiAttempt = fetchOrderDetail(orderId)
     .then((raw) => normalizeOrderDetail(raw, selfUserNo ?? capture.selfHint))
@@ -224,7 +212,7 @@ export async function resolveOrderContext(
     };
   }
 
-  // 3. DOM: ника и UID достаточно, чтобы показать досье.
+  // из DOM: ника и UID достаточно, чтобы показать досье
   const dom = capture.dom;
   if (dom?.counterpartyUid) {
     return {
@@ -252,7 +240,7 @@ export async function resolveOrderContext(
   );
 }
 
-/** Ручной сценарий: пользователь сам ввёл UID контрагента. */
+// пользователь сам ввёл UID контрагента
 export async function resolveManual(tabId: number, uid: string): Promise<OrderContext> {
   return {
     order: null,

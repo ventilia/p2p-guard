@@ -10,9 +10,7 @@ type AuditInput = {
   ip?: string;
 };
 
-/**
- * Аудит пишем «мягко»: падение лога не должно валить бизнес-операцию.
- */
+// падение лога не должно валить бизнес-операцию
 export async function audit(input: AuditInput): Promise<void> {
   try {
     await prisma.auditLog.create({

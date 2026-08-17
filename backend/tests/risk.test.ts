@@ -89,6 +89,79 @@ describe('calculateRisk', () => {
     assert.equal(worst.level, 'CRITICAL');
   });
 
+  it('тяжёлые теги жалоб весят отдельно от обычного негатива', () => {
+    const scam = calculateRisk({
+      ...base,
+      reviews: { positive: 0, neutral: 0, negative: 2 },
+      reviewTags: { SCAM: 2 },
+    });
+    const rude = calculateRisk({
+      ...base,
+      reviews: { positive: 0, neutral: 0, negative: 2 },
+      reviewTags: { RUDE: 2 },
+    });
+
+    assert.ok(scam.factors.some((f) => f.code === 'SEVERE_COMPLAINTS'));
+    assert.ok(!rude.factors.some((f) => f.code === 'SEVERE_COMPLAINTS'));
+    assert.ok(scam.score > rude.score, 'мошенник должен весить больше хамства');
+  });
+
+  it('ловит резкую смену среднего чека', () => {
+    const result = calculateRisk({
+      ...base,
+      exchange: { avgAmountFiat: 15_000, avgAmount30dFiat: 180_000 },
+    });
+    assert.ok(result.factors.some((f) => f.code === 'TICKET_MISMATCH'));
+  });
+
+  it('ловит сделку, не похожую на обычную для контрагента', () => {
+    const result = calculateRisk({
+      ...base,
+      currentOrderFiat: 300_000,
+      exchange: { avgAmount30dFiat: 11_000 },
+    });
+    const factor = result.factors.find((f) => f.code === 'ORDER_VS_AVG_TICKET');
+    assert.ok(factor, 'фактор должен сработать');
+    assert.match(factor.detail ?? '', /от среднего чека/);
+  });
+
+  it('ловит всплеск ордеров за последний месяц', () => {
+    const result = calculateRisk({
+      ...base,
+      exchange: { totalOrders: 30, orders30d: 28 },
+    });
+    assert.ok(result.factors.some((f) => f.code === 'RECENT_ORDER_BURST'));
+  });
+
+  it('ловит низкую долю позитива в отзывах биржи', () => {
+    const bad = calculateRisk({ ...base, exchange: { positiveCount: 4, negativeCount: 6 } });
+    const good = calculateRisk({ ...base, exchange: { positiveCount: 95, negativeCount: 5 } });
+    assert.ok(bad.factors.some((f) => f.code === 'LOW_POSITIVE_SHARE'));
+    assert.ok(!good.factors.some((f) => f.code === 'LOW_POSITIVE_SHARE'));
+  });
+
+  it('ловит недавнюю первую сделку при старой регистрации', () => {
+    const result = calculateRisk({
+      ...base,
+      exchange: { registeredDays: 400, firstOrderDays: 6 },
+    });
+    const codes = result.factors.map((f) => f.code);
+    assert.ok(codes.includes('FIRST_ORDER_RECENT'));
+    assert.ok(!codes.includes('YOUNG_ACCOUNT'), 'аккаунт старый — про регистрацию молчим');
+  });
+
+  it('малые расхождения в чеке не считаются сигналом', () => {
+    const result = calculateRisk({
+      ...base,
+      currentOrderFiat: 12_000,
+      exchange: { avgAmountFiat: 10_000, avgAmount30dFiat: 11_000 },
+    });
+    const codes = result.factors.map((f) => f.code);
+    assert.ok(!codes.includes('TICKET_MISMATCH'));
+    assert.ok(!codes.includes('ORDER_VS_AVG_TICKET'));
+    assert.equal(result.level, 'LOW');
+  });
+
   it('факторы отсортированы по значимости', () => {
     const result = calculateRisk({
       ...base,

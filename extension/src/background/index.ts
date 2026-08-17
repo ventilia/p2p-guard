@@ -1,21 +1,15 @@
-/**
- * Service worker: оркестратор расширения.
- *
- * 1. Ловит открытие страницы ордера Binance P2P;
- * 2. Собирает контекст ордера (перехват страницы → свой запрос → DOM);
- * 3. Отправляет нормализованные данные в наш бэкенд и получает досье;
- * 4. Пушит состояние панели в content script.
- *
- * MV3 усыпляет воркер, поэтому состояние панели дублируется в
- * chrome.storage.session — после пробуждения карточка не «моргает».
- */
+// оркестратор: ловит ордер, собирает контекст, ходит в бэкенд, пушит панель
+// MV3 усыпляет воркер, поэтому состояние панели дублируется в storage.session
 import { ApiError, apiRequest, authRequest } from './api.js';
 import {
   BinanceApiError,
   detectOrderId,
   fetchOrderList,
   fetchOwnUserNo,
+  fetchUserDetail,
   normalizeOrderDetail,
+  normalizeUserDetail,
+  readSessionState,
   rememberHeaders,
 } from './binance.js';
 import {
@@ -44,38 +38,48 @@ import type {
   OrderSnapshot,
   PanelState,
   RequisiteType,
+  Session,
+  Settings,
 } from '../shared/types.js';
 
 const SYNC_ALARM = 'p2pguard.sync-orders';
 const SYNC_INTERVAL_MINUTES = 15;
 const OWN_UID_KEY = 'pg.ownUid';
 
-/** Состояние панели по вкладкам. */
+// состояние панели по вкладкам
 const panelStates = new Map<number, PanelState>();
-/** Активный контрагент по вкладке — нужен для привязки реквизитов из чата. */
+// активный контрагент по вкладке, к нему привязываем реквизиты из чата
 const activeCounterparty = new Map<number, string>();
-/** Реквизиты, уже отправленные на сервер, чтобы не слать одно и то же. */
+// уже отправленные реквизиты, чтобы не слать одно и то же
 const seenRequisites = new Map<number, Set<string>>();
+// сумма открытого ордера по вкладке: без неё при обновлении досье пропадал бы
+// фактор сравнения со средним чеком, и балл менялся бы сам собой
+const activeOrderFiat = new Map<number, number>();
+
+// путь к досье с суммой текущего ордера, если она известна
+function dossierPath(tabId: number, counterpartyId: string): string {
+  const amount = activeOrderFiat.get(tabId);
+  const query = amount === undefined ? '' : `?orderFiat=${amount}`;
+  return `/counterparties/${counterpartyId}/dossier${query}`;
+}
 
 let ownUserNoCache: string | null = null;
 
 // ───────────────────────────── UID пользователя ─────────────────────────────
 
-/**
- * UID пользователя нужен, чтобы понять, кто из двух сторон ордера — контрагент.
- * Источники по убыванию надёжности; до запроса к бирже доходит редко.
- */
+// нужен, чтобы понять, кто из двух сторон ордера контрагент
+// источники по убыванию надёжности, до запроса к бирже доходит редко
 async function getOwnUserNo(tabId?: number): Promise<string | null> {
   if (ownUserNoCache) return ownUserNoCache;
 
-  // 1. Аккаунт расширения жёстко привязан к UID биржи — это и есть ответ.
+  // учётка расширения привязана к UID биржи — это и есть ответ
   const session = await getSession();
   if (session?.user.binanceUid) {
     ownUserNoCache = session.user.binanceUid;
     return ownUserNoCache;
   }
 
-  // 2. Указан вручную (нужно до входа — на этапе активации).
+  // указан вручную: нужно на этапе активации, до входа
   const stored = await chrome.storage.local.get(OWN_UID_KEY);
   const manual = stored[OWN_UID_KEY] as string | undefined;
   if (manual) {
@@ -83,7 +87,7 @@ async function getOwnUserNo(tabId?: number): Promise<string | null> {
     return manual;
   }
 
-  // 3. Подсмотрен в перехваченном ордере.
+  // подсмотрен в перехваченном ордере
   if (tabId !== undefined) {
     const hint = getSelfHint(tabId);
     if (hint) {
@@ -92,7 +96,7 @@ async function getOwnUserNo(tabId?: number): Promise<string | null> {
     }
   }
 
-  // 4. Последний вариант — спросить у самой биржи.
+  // последний вариант — спросить у самой биржи
   const fetched = await fetchOwnUserNo();
   if (fetched) ownUserNoCache = fetched;
   return fetched;
@@ -111,7 +115,7 @@ async function setPanelState(tabId: number, state: PanelState): Promise<void> {
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'PANEL_STATE', state });
   } catch {
-    // Content script ещё не поднялся — он сам запросит состояние при старте.
+    // content script ещё не поднялся, он сам запросит состояние при старте
   }
 }
 
@@ -135,7 +139,7 @@ function errorState(err: unknown, orderId?: string): PanelState {
       message: err.message,
       code: err.code,
       orderId,
-      // Эти ошибки лечатся ручным вводом UID контрагента.
+      // лечится ручным вводом UID контрагента
       canRetryManually:
         err.code === 'COUNTERPARTY_UNKNOWN' ||
         err.code === 'ORDER_SHAPE_UNKNOWN' ||
@@ -148,6 +152,27 @@ function errorState(err: unknown, orderId?: string): PanelState {
     orderId,
     canRetryManually: true,
   };
+}
+
+// после смены команды роль и teamId в сессии устаревают, панель их не увидит
+async function refreshProfile(): Promise<void> {
+  const session = await getSession();
+  if (!session) return;
+  try {
+    const me = await apiRequest<{ user: Session['user'] }>('/me');
+    await setSession({ ...session, user: me.user });
+  } catch (err) {
+    console.warn('[P2P Guard] не удалось обновить профиль', err);
+  }
+}
+
+// чтобы смена темы в попапе доезжала до уже открытой панели
+async function broadcastSettings(settings: Settings): Promise<void> {
+  const tabs = await chrome.tabs.query({ url: ['https://*.binance.com/*'] });
+  for (const tab of tabs) {
+    if (tab.id === undefined) continue;
+    chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_CHANGED', settings }).catch(() => undefined);
+  }
 }
 
 async function loadTemplates(): Promise<MessageTemplate[]> {
@@ -172,13 +197,13 @@ async function lookupDossier(
       countryCode: counterparty.countryCode,
       maskedPhone: counterparty.maskedPhone,
       stats: counterparty.stats,
-      // Ордер отправляем, только если он полноценный.
+      // ордер отправляем, только если он полноценный
       order: order?.externalId ? order : undefined,
     },
   });
 }
 
-/** Собирает готовое состояние панели по контексту ордера. */
+// готовое состояние панели по контексту ордера
 async function buildReadyState(
   tabId: number,
   orderId: string,
@@ -189,6 +214,10 @@ async function buildReadyState(
 
   activeCounterparty.set(tabId, dossier.counterparty.id);
   seenRequisites.delete(tabId);
+
+  const orderFiat = context.order?.amountFiat;
+  if (typeof orderFiat === 'number') activeOrderFiat.set(tabId, orderFiat);
+  else activeOrderFiat.delete(tabId);
 
   const templates = await loadTemplates();
 
@@ -204,7 +233,7 @@ async function buildReadyState(
   };
 }
 
-/** Главный сценарий: открылась страница ордера. */
+// главный сценарий: открылась страница ордера
 async function handleOrder(tabId: number, orderId: string): Promise<void> {
   const settings = await getSettings();
   if (!settings.panelEnabled) return;
@@ -230,17 +259,17 @@ async function handleOrder(tabId: number, orderId: string): Promise<void> {
   }
 }
 
-/** Перезапрашивает досье для вкладки, сохраняя тот же ордер. */
+// перезапрос досье для вкладки с тем же ордером
 async function refreshTab(tabId: number): Promise<PanelState> {
   const state = await getPanelState(tabId);
   const orderId = 'orderId' in state ? state.orderId : undefined;
 
-  // Если ордера нет (ручной режим) — просто обновляем досье по контрагенту.
+  // в ручном режиме ордера нет, обновляем досье по контрагенту
   if (!orderId) {
     const counterpartyId = activeCounterparty.get(tabId);
     if (!counterpartyId) return state;
     try {
-      const dossier = await apiRequest<Dossier>(`/counterparties/${counterpartyId}/dossier`);
+      const dossier = await apiRequest<Dossier>(dossierPath(tabId, counterpartyId));
       if (state.status === 'ready') {
         const next: PanelState = { ...state, dossier };
         await setPanelState(tabId, next);
@@ -258,7 +287,7 @@ async function refreshTab(tabId: number): Promise<PanelState> {
   return getPanelState(tabId);
 }
 
-/** Точечное обновление досье без повторного похода в Binance. */
+// точечное обновление досье без повторного похода в Binance
 async function refreshDossierOnly(tabId: number): Promise<PanelState> {
   const state = await getPanelState(tabId);
   const counterpartyId = activeCounterparty.get(tabId);
@@ -329,7 +358,7 @@ async function syncOrders(force = false): Promise<{ created: number; updated: nu
 
 // ───────────────────────────── Чат: реквизиты ─────────────────────────────
 
-/** Формат сообщений чата у Binance плавает — вытаскиваем текст «мягко». */
+// формат сообщений чата плавает, поэтому достаём текст мягко
 function extractChatText(payload: unknown, depth = 0): string | null {
   if (depth > 5) return null;
   if (typeof payload === 'string') return payload.length > 4000 ? null : payload;
@@ -350,11 +379,7 @@ function extractChatText(payload: unknown, depth = 0): string | null {
   return null;
 }
 
-/**
- * Сообщения чата приходят из page-world хука. Достаём карты/телефоны,
- * привязываем к контрагенту и предупреждаем, если реквизит новый —
- * подмена реквизита посреди сделки это классическая схема.
- */
+// карты и телефоны из чата: новый реквизит посреди сделки — классическая схема
 async function handleChatPayload(tabId: number, payload: unknown): Promise<void> {
   const settings = await getSettings();
   if (!settings.captureChatRequisites) return;
@@ -431,6 +456,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   panelStates.delete(tabId);
   activeCounterparty.delete(tabId);
+  activeOrderFiat.delete(tabId);
   seenRequisites.delete(tabId);
   clearCapture(tabId);
   void chrome.storage.session.remove(`pg.panel.${tabId}`);
@@ -457,17 +483,20 @@ async function handleMessage(
       return { ok: true, data: { session: await getSession(), settings: await getSettings() } };
 
     case 'AUTH_ACTIVATE': {
-      const uid = await getOwnUserNo(tabId);
+      // указанный вручную UID приоритетнее: автоопределение работает,
+      // только если пользователь уже вошёл на binance.com в этом браузере
+      const uid = request.binanceUid?.trim() || (await getOwnUserNo(tabId));
       if (!uid) {
         return {
           ok: false,
           error: {
             code: 'BINANCE_UID_UNKNOWN',
             message:
-              'Не удалось определить ваш UID Binance. Откройте binance.com и войдите либо укажите UID вручную.',
+              'Не удалось определить ваш UID Binance. Войдите на binance.com в этом браузере или впишите UID в поле ниже.',
           },
         };
       }
+      if (request.binanceUid?.trim()) await setOwnUserNo(request.binanceUid.trim());
       const session = await authRequest('/auth/activate', {
         token: request.token,
         binanceUid: uid,
@@ -514,8 +543,64 @@ async function handleMessage(
     case 'GET_SETTINGS':
       return { ok: true, data: await getSettings() };
 
-    case 'SET_SETTINGS':
-      return { ok: true, data: await setSettings(request.patch) };
+    // вошёл ли пользователь в Binance и тем ли аккаунтом, что привязан к учётке
+    case 'GET_BINANCE_SESSION': {
+      const [state, session] = await Promise.all([readSessionState(), getSession()]);
+
+      // UID из живой сессии браузера: он определяет, от чьего имени уйдут запросы
+      // ограничиваем ожидание: без этого попап не показывал бы блок сессии
+      // все те секунды, пока перебираются пути к недоступной бирже
+      let browserUid: string | null = null;
+      if (state.loggedIn) {
+        browserUid = await Promise.race([
+          fetchOwnUserNo().catch(() => null),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+        ]);
+      }
+
+      const accountUid = session?.user.binanceUid ?? null;
+      return {
+        ok: true,
+        data: {
+          loggedIn: state.loggedIn,
+          hasPageHeaders: state.hasPageHeaders,
+          browserUid,
+          accountUid,
+          mismatch: Boolean(browserUid && accountUid && browserUid !== accountUid),
+        },
+      };
+    }
+
+    // пароль от биржи не спрашиваем: куку должен поставить сам Binance,
+    // иначе запросы не пройдут антифрод
+    case 'OPEN_BINANCE_LOGIN': {
+      const tab = await chrome.tabs.create({ url: 'https://accounts.binance.com/ru/login' });
+      return { ok: true, data: { tabId: tab.id ?? null } };
+    }
+
+    // что расширение видит на активной вкладке: сам ли поймало ордер
+    case 'GET_TAB_STATUS': {
+      const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const url = active?.url ?? '';
+      const isBinance = /^https:\/\/[^/]*\bbinance\.com\//i.test(url);
+      const orderId = detectOrderId(url);
+
+      let counterpartyNick: string | null = null;
+      if (active?.id !== undefined) {
+        const state = await getPanelState(active.id);
+        if (state.status === 'ready') {
+          counterpartyNick = state.dossier.counterparty.nickname ?? state.dossier.counterparty.externalId;
+        }
+      }
+
+      return { ok: true, data: { isBinance, orderId, counterpartyNick } };
+    }
+
+    case 'SET_SETTINGS': {
+      const next = await setSettings(request.patch);
+      await broadcastSettings(next);
+      return { ok: true, data: next };
+    }
 
     case 'GET_PANEL_STATE': {
       const id = request.tabId ?? tabId;
@@ -553,6 +638,7 @@ async function handleMessage(
         body: {
           counterpartyId: request.counterpartyId,
           rating: request.rating,
+          tag: request.tag,
           text: request.text,
         },
       });
@@ -631,6 +717,84 @@ async function handleMessage(
       return { ok: true, data: null };
     }
 
+    // досье из попапа: ордера нет, поэтому находим по UID и обогащаем профилем
+    case 'LOOKUP_COUNTERPARTY': {
+      let snapshot: CounterpartySnapshot = { externalId: request.uid };
+      try {
+        const raw = await fetchUserDetail(request.uid);
+        const detail = raw ? normalizeUserDetail(raw) : null;
+        if (detail) snapshot = detail;
+      } catch {
+        // биржа недоступна, покажем то, что есть в нашей базе
+      }
+      return { ok: true, data: await lookupDossier(snapshot, null) };
+    }
+
+    case 'GET_DOSSIER':
+      return {
+        ok: true,
+        data: await apiRequest<Dossier>(`/counterparties/${request.counterpartyId}/dossier`),
+      };
+
+    case 'GET_TEAM':
+      return { ok: true, data: await apiRequest('/teams/me') };
+
+    case 'JOIN_TEAM': {
+      const result = await apiRequest('/teams/join', {
+        method: 'POST',
+        body: { token: request.token },
+      });
+      // команда меняет права, сессию надо перечитать
+      await refreshProfile();
+      return { ok: true, data: result };
+    }
+
+    case 'CREATE_TEAM': {
+      const result = await apiRequest('/teams', {
+        method: 'POST',
+        body: { name: request.name },
+      });
+      // создатель становится тимлидом, роль в сессии обязана обновиться
+      await refreshProfile();
+      return { ok: true, data: result };
+    }
+
+    case 'LEAVE_TEAM': {
+      const result = await apiRequest('/teams/leave', { method: 'POST' });
+      await refreshProfile();
+      return { ok: true, data: result };
+    }
+
+    case 'CREATE_TEAM_INVITE':
+      return {
+        ok: true,
+        data: await apiRequest('/teams/me/invites', {
+          method: 'POST',
+          body: {
+            label: request.label,
+            maxUses: request.maxUses,
+            expiresInDays: request.expiresInDays,
+          },
+        }),
+      };
+
+    case 'GET_TEMPLATES':
+      return { ok: true, data: { items: await loadTemplates() } };
+
+    case 'SAVE_TEMPLATE': {
+      const body = { title: request.title, body: request.body, shared: request.shared };
+      const data = request.id
+        ? await apiRequest(`/templates/${request.id}`, { method: 'PUT', body })
+        : await apiRequest('/templates', { method: 'POST', body });
+      return { ok: true, data };
+    }
+
+    case 'DELETE_TEMPLATE':
+      return {
+        ok: true,
+        data: await apiRequest(`/templates/${request.id}`, { method: 'DELETE' }),
+      };
+
     case 'GET_OWN_UID':
       return { ok: true, data: { uid: await getOwnUserNo(tabId) } };
 
@@ -658,6 +822,6 @@ chrome.runtime.onMessage.addListener((request: RuntimeRequest, sender, sendRespo
       sendResponse({ ok: false, error } satisfies RuntimeResponse);
     });
 
-  // true — ответ придёт асинхронно
+  // true: ответ придёт асинхронно
   return true;
 });

@@ -1,4 +1,4 @@
-/** Типы, общие для background, content script и попапа. */
+// типы, общие для background, content script и попапа
 
 export type Exchange = 'BINANCE' | 'BYBIT' | 'HTX' | 'OTHER';
 export type OrderSide = 'BUY' | 'SELL';
@@ -26,6 +26,8 @@ export type Settings = {
   panelEnabled: boolean;
   autoSyncOrders: boolean;
   captureChatRequisites: boolean;
+  // светлая по умолчанию, 'auto' — как в системе
+  theme: 'light' | 'dark' | 'auto';
 };
 
 export type ExchangeStats = {
@@ -38,10 +40,25 @@ export type ExchangeStats = {
   avgAmount30dFiat?: number | null;
   avgReleaseMinutes?: number | null;
   avgPayMinutes?: number | null;
+  // доля положительных отзывов биржи, 0..1
+  positiveRate?: number | null;
   positiveCount?: number | null;
   negativeCount?: number | null;
   activeOrders?: number | null;
   merchantLevel?: string | null;
+};
+
+// совпадают с enum ReviewTag на бэкенде
+export type ReviewTag = 'SCAM' | 'FREEZE' | 'DIRTY' | 'TERMS' | 'PAINTER' | 'RUDE' | 'COMMENT';
+
+export const REVIEW_TAG_LABEL: Record<ReviewTag, string> = {
+  SCAM: 'Мошенник',
+  FREEZE: 'Мороз',
+  DIRTY: 'Грязь',
+  TERMS: 'Невыполнение условий',
+  PAINTER: 'Художник',
+  RUDE: 'Неадекват',
+  COMMENT: 'Комментарий',
 };
 
 export type OrderSnapshot = {
@@ -64,7 +81,7 @@ export type CounterpartySnapshot = {
   stats?: ExchangeStats;
 };
 
-/** Что удалось прочитать прямо со страницы — запасной источник данных. */
+// что удалось прочитать прямо со страницы, запасной источник
 export type DomSnapshot = {
   orderId?: string;
   counterpartyUid?: string;
@@ -75,7 +92,7 @@ export type DomSnapshot = {
   amountFiat?: number;
 };
 
-/** Откуда взяты данные о контрагенте — показываем в панели. */
+// откуда взяты данные, показываем в панели
 export type ContextSource = 'intercept' | 'api' | 'dom' | 'manual';
 
 export type RiskFactor = { code: string; label: string; impact: number; detail?: string };
@@ -106,6 +123,7 @@ export type Dossier = {
   reviews: {
     id: string;
     rating: ReviewRating;
+    tag: ReviewTag;
     text: string;
     createdAt: string;
     author: string;
@@ -114,6 +132,8 @@ export type Dossier = {
     canDelete: boolean;
   }[];
   reviewCounts: { positive: number; neutral: number; negative: number };
+  // сколько жалоб какой категории, для ярлыков в шапке
+  tagCounts: Partial<Record<ReviewTag, number>>;
   teamNote: { text: string; updatedAt: string; author: string | null } | null;
   orders: {
     market: OrderSummary;
@@ -158,7 +178,7 @@ export type MessageTemplate = {
 
 export type ApiError = { code: string; message: string; details?: unknown };
 
-/** Состояние панели, которое background рассылает в content script. */
+// состояние панели, которое background рассылает в content script
 export type PanelState =
   | { status: 'idle' }
   | { status: 'unauthorized'; message: string }
@@ -170,9 +190,9 @@ export type PanelState =
       dossier: Dossier;
       templates: MessageTemplate[];
       source: ContextSource;
-      /** Роль пользователя — от неё зависит, доступен ли общий ЧС. */
+      // от роли зависит, доступен ли общий ЧС
       role: 'USER' | 'TEAM_LEAD' | 'ADMIN';
       hasTeam: boolean;
-      /** Реквизиты, замеченные в чате уже после открытия карточки. */
+      // реквизиты, замеченные в чате после открытия карточки
       requisiteAlert?: { mask: string; type: RequisiteType } | null;
     };

@@ -8,9 +8,11 @@ const KEYS = {
 
 export const DEFAULT_SETTINGS: Settings = {
   apiBaseUrl: 'http://localhost:4000/v1',
-  panelEnabled: true,
+  // выключено намеренно: на страницу биржи не лезем без разрешения
+  panelEnabled: false,
   autoSyncOrders: true,
   captureChatRequisites: true,
+  theme: 'light',
 };
 
 export async function getSession(): Promise<Session | null> {

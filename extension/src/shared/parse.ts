@@ -1,6 +1,6 @@
 import type { RequisiteType } from './types.js';
 
-/** Проверка номера карты по алгоритму Луна — отсекает случайные числа из чата. */
+// алгоритм Луна отсекает случайные числа из чата
 export function isValidCard(digits: string): boolean {
   if (digits.length < 13 || digits.length > 19) return false;
   let sum = 0;
@@ -18,7 +18,7 @@ export function isValidCard(digits: string): boolean {
   return sum % 10 === 0;
 }
 
-/** Российские/казахстанские мобильные и общий международный формат. */
+// российские и казахстанские мобильные плюс общий международный формат
 function isValidPhone(digits: string): boolean {
   if (digits.length < 10 || digits.length > 15) return false;
   // 79161234567 / 89161234567 / 9161234567
@@ -29,16 +29,13 @@ function isValidPhone(digits: string): boolean {
 
 export type ParsedRequisite = { type: RequisiteType; value: string };
 
-/**
- * Достаёт реквизиты из текста сообщения чата.
- * Специально консервативно: лучше пропустить, чем засорить базу мусором.
- */
+// консервативно: лучше пропустить реквизит, чем засорить базу мусором
 export function extractRequisites(text: string): ParsedRequisite[] {
   if (!text) return [];
 
   const found = new Map<string, ParsedRequisite>();
 
-  // Карты: группы цифр, возможно разделённые пробелами/дефисами
+  // карты: группы цифр, возможно через пробел или дефис
   const cardCandidates = text.match(/\b(?:\d[ \-]?){12,22}\b/g) ?? [];
   for (const raw of cardCandidates) {
     const digits = raw.replace(/\D+/g, '');
@@ -47,7 +44,7 @@ export function extractRequisites(text: string): ParsedRequisite[] {
     }
   }
 
-  // Телефоны: с ведущим + или 8/7
+  // телефоны: с ведущим + или 8/7
   const phoneCandidates = text.match(/(?:\+?\d[\d \-()]{8,18}\d)/g) ?? [];
   for (const raw of phoneCandidates) {
     const digits = raw.replace(/\D+/g, '');
@@ -62,7 +59,7 @@ export function extractRequisites(text: string): ParsedRequisite[] {
   return [...found.values()];
 }
 
-/** 4276123412341234 → 4276••••1234 */
+// 4276123412341234 → 4276••••1234
 export function maskRequisite(digits: string): string {
   if (digits.length <= 4) return '•'.repeat(digits.length);
   const head = digits.slice(0, Math.min(4, digits.length - 4));

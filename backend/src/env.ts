@@ -22,7 +22,7 @@ const parsed = schema.safeParse(process.env);
 
 if (!parsed.success) {
   const issues = parsed.error.issues.map((i) => `  • ${i.path.join('.')}: ${i.message}`).join('\n');
-  // Падаем сразу и понятно, а не «где-то потом undefined»
+  // падаем сразу и понятно, а не «где-то потом undefined»
   throw new Error(`Некорректная конфигурация окружения:\n${issues}`);
 }
 

@@ -4,17 +4,32 @@ import { prisma } from '../db.js';
 import { auditFromRequest } from '../lib/audit.js';
 import { forbidden, notFound } from '../lib/errors.js';
 
-const createSchema = z.object({
-  counterpartyId: z.string().min(1),
-  rating: z.enum(['POSITIVE', 'NEUTRAL', 'NEGATIVE']),
-  text: z.string().trim().min(3, 'Слишком короткий отзыв').max(2000),
-  orderRef: z.string().trim().max(64).optional(),
-});
+export const REVIEW_TAGS = [
+  'SCAM',
+  'FREEZE',
+  'DIRTY',
+  'TERMS',
+  'PAINTER',
+  'RUDE',
+  'COMMENT',
+] as const;
+
+const createSchema = z
+  .object({
+    counterpartyId: z.string().min(1),
+    rating: z.enum(['POSITIVE', 'NEUTRAL', 'NEGATIVE']),
+    tag: z.enum(REVIEW_TAGS).default('COMMENT'),
+    text: z.string().trim().min(3, 'Слишком короткий отзыв').max(2000),
+    orderRef: z.string().trim().max(64).optional(),
+  })
+  // положительный отзыв обвинением быть не может: иначе он попадёт в tagCounts
+  // и поднимет риск-скор через фактор тяжёлых жалоб
+  .transform((body) => (body.rating === 'POSITIVE' ? { ...body, tag: 'COMMENT' as const } : body));
 
 export async function reviewRoutes(app: FastifyInstance): Promise<void> {
   const auth = { preHandler: [app.authenticate, app.requireSubscription] };
 
-  /** Один отзыв на пару (автор, контрагент): повторный вызов правит существующий. */
+  // один отзыв на пару автор-контрагент, повторный вызов правит существующий
   app.post('/reviews', auth, async (req) => {
     const body = createSchema.parse(req.body);
     const ctx = req.auth!;
@@ -37,11 +52,13 @@ export async function reviewRoutes(app: FastifyInstance): Promise<void> {
         authorId: ctx.user.id,
         teamId: ctx.teamId,
         rating: body.rating,
+        tag: body.tag,
         text: body.text,
         orderRef: body.orderRef ?? null,
       },
       update: {
         rating: body.rating,
+        tag: body.tag,
         text: body.text,
         orderRef: body.orderRef ?? null,
         teamId: ctx.teamId,
@@ -52,10 +69,17 @@ export async function reviewRoutes(app: FastifyInstance): Promise<void> {
       action: 'review.upsert',
       targetType: 'counterparty',
       targetId: counterparty.id,
-      meta: { rating: body.rating },
+      meta: { rating: body.rating, tag: body.tag },
     });
 
-    return { id: review.id, createdAt: review.createdAt, updatedAt: review.updatedAt };
+    // tag отдаём наружу: он мог быть скорректирован схемой
+    return {
+      id: review.id,
+      rating: review.rating,
+      tag: review.tag,
+      createdAt: review.createdAt,
+      updatedAt: review.updatedAt,
+    };
   });
 
   app.delete('/reviews/:id', auth, async (req) => {
@@ -79,7 +103,7 @@ export async function reviewRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  /** Мои отзывы — для попапа. */
+  // мои отзывы для попапа
   app.get('/reviews/mine', auth, async (req) => {
     const { limit } = z
       .object({ limit: z.coerce.number().int().min(1).max(100).default(50) })

@@ -1,7 +1,4 @@
-/**
- * Генератор иконок расширения (щит на тёмном фоне) без внешних зависимостей.
- * Запуск: node scripts/gen-icons.mjs → public/icons/icon{16,48,128}.png
- */
+// генератор иконок без внешних зависимостей: public/icons/icon{16,48,128}.png
 import { deflateSync } from 'node:zlib';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -40,7 +37,7 @@ function chunk(type, data) {
 }
 
 function encodePng(size, pixelAt) {
-  // Каждая строка PNG начинается с байта фильтра (0 = None)
+  // каждая строка PNG начинается с байта фильтра, 0 = None
   const raw = Buffer.alloc(size * (size * 4 + 1));
   let offset = 0;
   for (let y = 0; y < size; y += 1) {
@@ -73,7 +70,7 @@ function encodePng(size, pixelAt) {
   ]);
 }
 
-/** Щит: сверху прямоугольник, снизу сужение в остриё. */
+// щит: сверху прямоугольник, снизу сужение в остриё
 function inShield(nx, ny, scale = 1) {
   const halfWidth = 0.27 * scale;
   const top = 0.5 - 0.32 * scale;
@@ -95,7 +92,7 @@ function pixel(size) {
     const nx = (x + 0.5) / size;
     const ny = (y + 0.5) / size;
 
-    // Скруглённые углы подложки
+    // скруглённые углы подложки
     const cx = Math.min(x + 0.5, size - x - 0.5);
     const cy = Math.min(y + 0.5, size - y - 0.5);
     if (cx < radius && cy < radius) {
@@ -104,7 +101,7 @@ function pixel(size) {
     }
 
     if (inShield(nx, ny)) {
-      // Внутренняя выемка — «галочка» негативом
+      // внутренняя выемка негативом
       const inner = inShield(nx, ny, 0.62);
       if (inner && ny > 0.42 && ny < 0.62 && Math.abs(nx - 0.5) < 0.14) return FG_DARK;
       return FG;

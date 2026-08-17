@@ -31,16 +31,13 @@ const syncSchema = z.object({
 export async function orderRoutes(app: FastifyInstance): Promise<void> {
   const auth = { preHandler: [app.authenticate, app.requireSubscription] };
 
-  /**
-   * Пакетная выгрузка истории ордеров из расширения.
-   * Идемпотентна: ключ — (exchange, externalId).
-   */
+  // пакетная выгрузка из расширения, идемпотентна по (exchange, externalId)
   app.post('/orders/sync', auth, async (req) => {
     const body = syncSchema.parse(req.body);
     const ctx = req.auth!;
     const now = new Date();
 
-    // 1. Контрагенты — по одному разу на уникальный UID, а не на каждый ордер.
+    // контрагенты — по разу на уникальный UID, а не на каждый ордер
     const uniqueCounterparties = new Map<string, NonNullable<(typeof body.items)[number]['counterparty']>>();
     for (const item of body.items) {
       if (item.counterparty) uniqueCounterparties.set(item.counterparty.externalId, item.counterparty);
@@ -66,7 +63,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       counterpartyIdByExternalId.set(cp.externalId, saved.id);
     }
 
-    // 2. Одним запросом узнаём, какие ордера уже есть и чьи они.
+    // одним запросом узнаём, какие ордера уже есть и чьи они
     const existing = await prisma.order.findMany({
       where: {
         exchange: body.exchange,
@@ -106,7 +103,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         continue;
       }
 
-      // Чужие ордера не трогаем: владелец записи — тот, кто её создал.
+      // чужие ордера не трогаем
       if (found.userId !== ctx.user.id) {
         skipped += 1;
         continue;
@@ -127,7 +124,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       });
     }
 
-    // 3. Запись: массовая вставка + точечные обновления в одной транзакции.
+    // массовая вставка и точечные обновления в одной транзакции
     const [createResult] = await prisma.$transaction([
       prisma.order.createMany({ data: toCreate, skipDuplicates: true }),
       ...toUpdate.map((u) => prisma.order.update({ where: { id: u.id }, data: u.data })),
@@ -141,7 +138,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  /** Мои последние ордера — для попапа. */
+  // мои последние ордера для попапа
   app.get('/orders/mine', auth, async (req) => {
     const { limit } = z
       .object({ limit: z.coerce.number().int().min(1).max(100).default(30) })

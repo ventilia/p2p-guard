@@ -1,9 +1,4 @@
-/**
- * HTTP-клиент к бэкенду P2P Guard.
- *
- * Живёт только в service worker: content script в наш API не ходит вообще —
- * так токен доступа не попадает в контекст страницы биржи.
- */
+// живёт только в service worker: так токен не попадает в контекст страницы биржи
 import { getSession, getSettings, setSession } from '../shared/storage.js';
 import type { Session } from '../shared/types.js';
 
@@ -23,7 +18,7 @@ type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   auth?: boolean;
-  /** Внутренний флаг: запрос уже повторялся после refresh. */
+  // запрос уже повторялся после refresh
   retried?: boolean;
 };
 
@@ -44,12 +39,12 @@ async function parseError(response: Response): Promise<ApiError> {
       message = data.error.message ?? message;
     }
   } catch {
-    // тело не JSON — оставляем дефолт
+    // тело не JSON, оставляем дефолт
   }
   return new ApiError(response.status, code, message);
 }
 
-/** Обновление access-токена. Параллельные вызовы разделяют один запрос. */
+// параллельные вызовы разделяют один запрос за токеном
 async function refreshSession(): Promise<Session | null> {
   if (refreshPromise) return refreshPromise;
 
@@ -65,7 +60,7 @@ async function refreshSession(): Promise<Session | null> {
       });
 
       if (!response.ok) {
-        // Refresh невалиден — сессию чистим, пользователь залогинится заново.
+        // refresh невалиден, чистим сессию
         await setSession(null);
         return null;
       }
@@ -129,7 +124,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return (await response.json()) as T;
 }
 
-/** Логин/активация не требуют токена и сами сохраняют сессию. */
+// логин и активация не требуют токена и сами сохраняют сессию
 export async function authRequest(
   path: '/auth/login' | '/auth/activate',
   body: Record<string, unknown>,

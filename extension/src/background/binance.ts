@@ -1,20 +1,6 @@
-/**
- * Адаптер Binance P2P.
- *
- * Приватный C2C API не документирован, поэтому расширение НЕ полагается на
- * угаданные пути. Порядок источников данных:
- *
- *   1) Пассивный перехват — страница сама вызывает свой API, а page-hook
- *      отдаёт нам ответы. Работает независимо от того, как называются
- *      эндпоинты сегодня: мы распознаём данные по форме объекта.
- *   2) Активный запрос — если перехвата не случилось (страница взяла данные
- *      из кэша), пробуем известные пути, подставляя заголовки, которые
- *      страница использовала в своих запросах.
- *   3) Разбор DOM — последний рубеж: ник и UID видны на странице.
- *
- * Всё выполняется в браузере пользователя под его же сессией; cookie наружу
- * не передаётся.
- */
+// приватный C2C API не документирован, поэтому на угаданные пути не полагаемся:
+// сначала перехват ответов страницы, потом свой запрос, потом разбор DOM
+// всё идёт под сессией пользователя, cookie наружу не уходит
 import type {
   CounterpartySnapshot,
   ExchangeStats,
@@ -25,7 +11,7 @@ import type {
 
 const HOSTS = ['https://p2p.binance.com', 'https://c2c.binance.com', 'https://www.binance.com'] as const;
 
-/** Кандидаты путей. Первый сработавший запоминается и идёт первым дальше. */
+// первый сработавший путь запоминается и дальше идёт первым
 const ENDPOINT_CANDIDATES = {
   orderDetail: [
     '/bapi/c2c/v2/private/c2c/order-match/order-detail',
@@ -37,7 +23,9 @@ const ENDPOINT_CANDIDATES = {
     '/bapi/c2c/v2/private/c2c/order-match/order-list',
     '/bapi/c2c/v1/private/c2c/orderMatch/listUserOrderHistory',
   ],
+  // profile-and-ads-list подтверждён внешними источниками, поэтому первый
   userDetail: [
+    '/bapi/c2c/v2/friendly/c2c/user/profile-and-ads-list',
     '/bapi/c2c/v2/friendly/c2c/user/base-detail',
     '/bapi/c2c/v1/friendly/c2c/user/base-detail',
     '/bapi/c2c/v2/public/c2c/userCenter/getUserBaseDetail',
@@ -50,19 +38,100 @@ const ENDPOINT_CANDIDATES = {
 
 type EndpointKind = keyof typeof ENDPOINT_CANDIDATES;
 
-let preferredHost: string = HOSTS[0];
-const preferredPath: Partial<Record<EndpointKind, string>> = {};
+// одиночный запрос не должен подвешивать всю проверку
+const REQUEST_TIMEOUT_MS = 7000;
 
-/** Заголовки, подсмотренные у самой страницы (csrftoken, device-info и т.п.). */
-let borrowedHeaders: Record<string, string> = {};
+const ROUTE_KEY = 'pg.binance.route';
+
+// выученный маршрут к API: рабочий хост, пути и заголовки со страницы
+// хранится в storage, а не в модуле: MV3 усыпляет воркер, и после пробуждения
+// перебор всех путей на всех хостах начинался бы заново
+type Route = {
+  host: string;
+  paths: Partial<Record<EndpointKind, string>>;
+  headers: Record<string, string>;
+  // отпечаток сессии, которой принадлежат заголовки: после смены аккаунта
+  // старый csrftoken приведёт к отказу биржи
+  sessionKey?: string;
+};
+
+// по наличию этих кук судим, что пользователь вошёл на Binance
+const SESSION_COOKIES = ['p20t', 'cr00', 'logined'] as const;
+const CSRF_COOKIES = ['csrftoken', 'p20t', 'cr00'] as const;
+
+async function binanceCookies(): Promise<chrome.cookies.Cookie[]> {
+  try {
+    return await chrome.cookies.getAll({ domain: '.binance.com' });
+  } catch {
+    return [];
+  }
+}
+
+// не криптография: нужен только чтобы заметить смену аккаунта
+function sessionKeyOf(cookies: chrome.cookies.Cookie[]): string | null {
+  for (const name of SESSION_COOKIES) {
+    const value = cookies.find((c) => c.name === name)?.value;
+    if (value) return `${name}:${value.slice(-12)}`;
+  }
+  return null;
+}
+
+let route: Route | null = null;
+let routeLoading: Promise<Route> | null = null;
+
+async function getRoute(): Promise<Route> {
+  if (route) return route;
+  if (!routeLoading) {
+    routeLoading = (async () => {
+      let saved: Partial<Route> | undefined;
+      try {
+        const stored = await chrome.storage.local.get(ROUTE_KEY);
+        saved = stored[ROUTE_KEY] as Partial<Route> | undefined;
+      } catch {
+        // хранилище недоступно, поедем на значениях по умолчанию
+      }
+      route = {
+        host: saved?.host ?? HOSTS[0],
+        paths: saved?.paths ?? {},
+        headers: saved?.headers ?? {},
+      };
+      return route;
+    })();
+  }
+  return routeLoading;
+}
+
+// в фоне: результат запроса не должен ждать записи в storage
+function persistRoute(): void {
+  if (!route) return;
+  void chrome.storage.local.set({ [ROUTE_KEY]: route }).catch(() => undefined);
+}
 
 export function rememberHeaders(headers: Record<string, string>): void {
   if (!headers || !Object.keys(headers).length) return;
-  borrowedHeaders = { ...borrowedHeaders, ...headers };
+  void (async () => {
+    const current = await getRoute();
+    current.headers = { ...current.headers, ...headers };
+    // помечаем сессию, чтобы buildHeaders выбросил чужие заголовки
+    const key = sessionKeyOf(await binanceCookies());
+    if (key) current.sessionKey = key;
+    persistRoute();
+  })();
 }
 
-export function getBorrowedHeaders(): Record<string, string> {
-  return borrowedHeaders;
+export async function getBorrowedHeaders(): Promise<Record<string, string>> {
+  return (await getRoute()).headers;
+}
+
+// сброс выученного маршрута, если биржа переехала
+export async function resetRoute(): Promise<void> {
+  route = null;
+  routeLoading = null;
+  try {
+    await chrome.storage.local.remove(ROUTE_KEY);
+  } catch {
+    // не критично
+  }
 }
 
 export class BinanceApiError extends Error {
@@ -75,88 +144,162 @@ export class BinanceApiError extends Error {
   }
 }
 
-async function csrfFromCookies(): Promise<string | null> {
-  try {
-    const cookies = await chrome.cookies.getAll({ domain: '.binance.com' });
-    for (const name of ['csrftoken', 'p20t', 'cr00']) {
-      const cookie = cookies.find((c) => c.name === name);
-      if (cookie?.value) return cookie.value;
-    }
-    return null;
-  } catch {
-    return null;
-  }
+// состояние сессии биржи: нужно, чтобы объяснить, почему запросы не проходят
+export type BinanceSession = {
+  loggedIn: boolean;
+  // UID, под которым пользователь вошёл в браузере
+  uid: string | null;
+  // успели ли подсмотреть живые заголовки со страницы биржи
+  hasPageHeaders: boolean;
+};
+
+export async function readSessionState(): Promise<Omit<BinanceSession, 'uid'>> {
+  const cookies = await binanceCookies();
+  const current = await getRoute();
+  return {
+    loggedIn: sessionKeyOf(cookies) !== null,
+    hasPageHeaders: Object.keys(current.headers).length > 0,
+  };
 }
 
 async function buildHeaders(): Promise<Record<string, string>> {
+  const current = await getRoute();
+  const cookies = await binanceCookies();
+  const key = sessionKeyOf(cookies);
+
+  // сессия сменилась, заголовки от прошлого аккаунта только навредят
+  if (key !== null && current.sessionKey && current.sessionKey !== key) {
+    current.headers = {};
+    current.sessionKey = key;
+    persistRoute();
+  } else if (key !== null && !current.sessionKey) {
+    current.sessionKey = key;
+    persistRoute();
+  }
+
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     clienttype: 'web',
-    ...borrowedHeaders,
+    ...current.headers,
   };
+
   if (!headers.csrftoken) {
-    const csrf = await csrfFromCookies();
-    if (csrf) headers.csrftoken = csrf;
+    for (const name of CSRF_COOKIES) {
+      const value = cookies.find((c) => c.name === name)?.value;
+      if (value) {
+        headers.csrftoken = value;
+        break;
+      }
+    }
   }
   return headers;
 }
 
-/** POST на первый рабочий (хост, путь) из кандидатов. */
-async function post<T>(kind: EndpointKind, body: Record<string, unknown>): Promise<T> {
-  const headers = await buildHeaders();
+// одна попытка «хост + путь», бросает BinanceApiError если не вышло
+async function attempt<T>(
+  host: string,
+  path: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<{ host: string; data: T }> {
+  const response = await fetch(`${host}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify(body),
+    signal,
+  });
 
-  const paths = [
-    ...(preferredPath[kind] ? [preferredPath[kind]!] : []),
-    ...ENDPOINT_CANDIDATES[kind].filter((p) => p !== preferredPath[kind]),
-  ];
-  const hosts = [preferredHost, ...HOSTS.filter((h) => h !== preferredHost)];
+  if (response.status === 401 || response.status === 403) {
+    throw new BinanceApiError('BINANCE_UNAUTHORIZED', 'Вы не авторизованы на Binance');
+  }
+  if (response.status === 404 || response.status === 405) {
+    throw new BinanceApiError('BINANCE_NOT_FOUND', `Путь ${path} недоступен`);
+  }
+  if (!response.ok) {
+    throw new BinanceApiError('BINANCE_HTTP', `Binance ответил ${response.status}`);
+  }
+
+  const json = (await response.json()) as {
+    success?: boolean;
+    code?: string;
+    message?: string;
+    data?: T;
+  };
+
+  if (json.success === false) {
+    // биржа ответила, но отказала — чаще всего такого пользователя нет
+    const code = json.code ?? 'BINANCE_ERROR';
+    const notFound = /not.?exist|no.?such|000002/i.test(`${code} ${json.message ?? ''}`);
+    throw new BinanceApiError(
+      notFound ? 'COUNTERPARTY_NOT_ON_EXCHANGE' : code,
+      json.message ?? 'Binance отклонил запрос',
+    );
+  }
+
+  return { host, data: (json.data ?? (json as unknown)) as T };
+}
+
+const isUnauthorized = (err: unknown) =>
+  err instanceof BinanceApiError && err.code === 'BINANCE_UNAUTHORIZED';
+const isNotOnExchange = (err: unknown) =>
+  err instanceof BinanceApiError && err.code === 'COUNTERPARTY_NOT_ON_EXCHANGE';
+
+// хосты для одного пути пробуем параллельно и берём первый успех
+// выученную пару сохраняем, поэтому со второго раза запрос ровно один
+async function post<T>(kind: EndpointKind, body: Record<string, unknown>): Promise<T> {
+  const [headers, current] = await Promise.all([buildHeaders(), getRoute()]);
+
+  const known = current.paths[kind];
+
+  // маршрут выучен — идём одним запросом, без веера по хостам
+  if (known) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const winner = await attempt<T>(current.host, known, headers, body, controller.signal);
+      return winner.data;
+    } catch (err) {
+      if (isUnauthorized(err) || isNotOnExchange(err)) throw err;
+      // не вышло — биржа могла переехать, ниже полный перебор
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
+  }
+
+  const paths = known
+    ? [known, ...ENDPOINT_CANDIDATES[kind].filter((p) => p !== known)]
+    : [...ENDPOINT_CANDIDATES[kind]];
+  const hosts = [current.host, ...HOSTS.filter((h) => h !== current.host)];
 
   let lastError: Error | null = null;
 
   for (const path of paths) {
-    for (const host of hosts) {
-      try {
-        const response = await fetch(`${host}${path}`, {
-          method: 'POST',
-          credentials: 'include',
-          headers,
-          body: JSON.stringify(body),
-        });
+    const controllers = hosts.map(() => new AbortController());
+    const timers = controllers.map((c) =>
+      setTimeout(() => c.abort(new BinanceApiError('BINANCE_TIMEOUT', 'Binance не ответил')), REQUEST_TIMEOUT_MS),
+    );
 
-        if (response.status === 401) {
-          throw new BinanceApiError('BINANCE_UNAUTHORIZED', 'Вы не авторизованы на Binance');
-        }
-        if (response.status === 404 || response.status === 405) {
-          lastError = new BinanceApiError('BINANCE_NOT_FOUND', `Путь ${path} недоступен`);
-          break; // этот путь мёртв на всех хостах — пробуем следующий
-        }
-        if (!response.ok) {
-          lastError = new BinanceApiError('BINANCE_HTTP', `Binance ответил ${response.status}`);
-          continue;
-        }
+    try {
+      const winner = await Promise.any(
+        hosts.map((host, i) => attempt<T>(host, path, headers, body, controllers[i]!.signal)),
+      );
 
-        const data = (await response.json()) as {
-          success?: boolean;
-          code?: string;
-          message?: string;
-          data?: T;
-        };
-
-        if (data.success === false) {
-          lastError = new BinanceApiError(
-            data.code ?? 'BINANCE_ERROR',
-            data.message ?? 'Binance отклонил запрос',
-          );
-          continue;
-        }
-
-        preferredHost = host;
-        preferredPath[kind] = path;
-        return (data.data ?? (data as unknown)) as T;
-      } catch (err) {
-        if (err instanceof BinanceApiError && err.code === 'BINANCE_UNAUTHORIZED') throw err;
-        lastError = err instanceof Error ? err : new Error(String(err));
-      }
+      current.host = winner.host;
+      current.paths[kind] = path;
+      persistRoute();
+      return winner.data;
+    } catch (err) {
+      const errors = err instanceof AggregateError ? err.errors : [err];
+      // эти два случая перебором путей не лечатся, отвечаем сразу
+      const fatal = errors.find((e) => isUnauthorized(e) || isNotOnExchange(e));
+      if (fatal) throw fatal;
+      lastError = (errors.find((e) => e instanceof BinanceApiError) as Error | undefined) ?? lastError;
+    } finally {
+      for (const t of timers) clearTimeout(t);
+      for (const c of controllers) c.abort();
     }
   }
 
@@ -167,13 +310,7 @@ async function post<T>(kind: EndpointKind, body: Record<string, unknown>): Promi
 
 const ORDER_ID_RE = /(?:orderNo|orderNumber|adOrderNo|orderId)=(\d{6,32})/i;
 
-/**
- * Номер ордера из URL. Поддержаны все известные варианты страницы:
- *   /ru/fiatOrderDetail?orderNo=...
- *   /en/orderDetail?orderNo=...
- *   /trade/order/2081234...
- *   ...#/orderDetail?orderNo=...
- */
+// номер ордера из URL: query, хэш SPA-роутера или длинное число в пути
 export function detectOrderId(url: string | undefined): string | null {
   if (!url) return null;
   try {
@@ -197,11 +334,7 @@ export function detectOrderId(url: string | undefined): string | null {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/**
- * Обходит произвольный JSON и собирает объекты, подходящие под предикат.
- * Так мы находим ордер или профиль независимо от того, во что биржа их
- * завернула на этой неделе.
- */
+// ищем объект по форме, а не по пути — тогда обёртка ответа не важна
 export function findObjects(
   root: unknown,
   predicate: (value: Record<string, unknown>) => boolean,
@@ -229,7 +362,7 @@ export function findObjects(
 const hasAny = (obj: Record<string, unknown>, keys: string[]) =>
   keys.some((key) => obj[key] !== undefined && obj[key] !== null && obj[key] !== '');
 
-/** Похоже на ордер P2P: есть номер и хотя бы одна сторона сделки. */
+// похоже на ордер: есть номер и хотя бы одна сторона сделки
 export const looksLikeOrder = (obj: Record<string, unknown>): boolean =>
   hasAny(obj, ['orderNumber', 'orderNo', 'advOrderNumber']) &&
   hasAny(obj, [
@@ -244,17 +377,25 @@ export const looksLikeOrder = (obj: Record<string, unknown>): boolean =>
     'tradeType',
   ]);
 
-/** Похоже на профиль пользователя C2C: есть userNo и статистика/ник. */
+// похоже на профиль: есть userNo и статистика или ник
 export const looksLikeUser = (obj: Record<string, unknown>): boolean =>
   hasAny(obj, ['userNo']) &&
-  hasAny(obj, ['nickName', 'nickname', 'userStatsRet', 'registerDays', 'merchantLevel']);
+  hasAny(obj, [
+    'nickName',
+    'nickname',
+    'userStatsRet',
+    'userDetailVo',
+    'registerDays',
+    'merchantLevel',
+    'userType',
+    'monthOrderCount',
+    'monthFinishRate',
+    'positiveRate',
+  ]);
 
 // ───────────────────────────── Нормализация ─────────────────────────────
 
-/**
- * Коды статусов Binance C2C. Числовые значения сверены с поведением
- * страницы; строковые варианты встречаются в части ответов.
- */
+// числовые коды сверены с поведением страницы, строковые — с документацией C2C
 const NUMERIC_STATUS: Record<number, OrderStatus> = {
   1: 'PENDING',
   2: 'PAID',
@@ -320,15 +461,11 @@ const daysSince = (ms: number | undefined): number | undefined =>
 export type ParsedOrder = {
   order: OrderSnapshot;
   counterparty: CounterpartySnapshot | null;
-  /** UID самого пользователя, если его удалось вывести из ответа. */
+  // UID самого пользователя, если удалось вывести из ответа
   selfHint: string | null;
 };
 
-/**
- * Приводит «похожий на ордер» объект к нашей модели.
- * `selfUserNo` помогает понять, кто из buyer/seller — контрагент;
- * без него ориентируемся на сторону сделки.
- */
+// selfUserNo говорит, кто из buyer/seller контрагент, без него смотрим на сторону
 export function normalizeOrderDetail(
   raw: Record<string, unknown>,
   selfUserNo: string | null,
@@ -371,7 +508,7 @@ export function normalizeOrderDetail(
     } else if (selfUserNo && sellerNo === selfUserNo) {
       assignFromBuyer();
     } else if (side === 'BUY') {
-      // Мы покупаем → контрагент продавец, а покупатель — это мы.
+      // мы покупаем, значит контрагент продавец
       assignFromSeller();
       selfHint = buyerNo ?? null;
     } else {
@@ -406,46 +543,81 @@ export function normalizeOrderDetail(
   return { order, counterparty, selfHint };
 }
 
+// доля приходит и процентом (97.5), и дробью (0.975) — приводим к 0..1
+function toShare(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return value > 1 ? value / 100 : value;
+}
+
 export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartySnapshot | null {
   const externalId = toText(pick(raw, ['userNo', 'userId']));
   if (!externalId) return null;
 
-  const s = (isRecord(raw.userStatsRet) ? raw.userStatsRet : raw) as Record<string, unknown>;
+  // профиль лежит в userDetailVo, userStatsRet или плоско — поддерживаем всё
+  const detail = (isRecord(raw.userDetailVo) ? raw.userDetailVo : raw) as Record<string, unknown>;
+  const s = (isRecord(detail.userStatsRet) ? detail.userStatsRet : detail) as Record<string, unknown>;
 
-  const orders30d = toNumber(pick(s, ['tradeCountOfLast30day', 'monthOrderCount', 'orderCount30d']));
+  const orders30d = toNumber(
+    pick(s, [
+      'tradeCountOfLast30day',
+      'monthOrderCount',
+      'orderCount30d',
+      'completedOrderNumOfLatest30day',
+    ]),
+  );
   const amount30d = toNumber(pick(s, ['tradeAmountOfLast30day', 'monthTradeAmount']));
   const releaseSeconds = toNumber(pick(s, ['avgReleaseTimeOfLast30day', 'avgReleaseTime']));
   const paySeconds = toNumber(pick(s, ['avgPayTimeOfLast30day', 'avgPayTime']));
 
-  let completionRate = toNumber(pick(s, ['finishRate', 'completionRate', 'monthFinishRate']));
-  // Иногда приходит в процентах (97.5), иногда долей (0.975) — приводим к доле.
-  if (completionRate !== undefined && completionRate > 1) completionRate /= 100;
+  const completionRate = toShare(
+    toNumber(pick(s, ['finishRate', 'completionRate', 'monthFinishRate'])),
+  );
+  const positiveRate = toShare(toNumber(pick(s, ['positiveRate', 'goodRate'])));
+
+  const positiveCount = toNumber(pick(s, ['positiveCount', 'goodAppraiseCount']));
+  const negativeCount = toNumber(pick(s, ['negativeCount', 'badAppraiseCount']));
+
+  const totalOrders = toNumber(
+    pick(s, ['completedOrderNum', 'totalFinishCount', 'totalOrderCount', 'orderCount']),
+  );
+  // средний чек биржа не отдаёт, считаем сами: оборот на число сделок
+  const totalAmount = toNumber(
+    pick(s, ['totalTradeAmount', 'tradeAmount', 'allTradeAmount', 'finishAmount']),
+  );
+  const avgAmountFiat =
+    totalOrders && totalAmount ? Math.round(totalAmount / totalOrders) : undefined;
 
   const stats: ExchangeStats = {
     registeredDays:
-      toNumber(pick(raw, ['registerDays'])) ?? daysSince(toNumber(pick(raw, ['registerTime']))) ?? null,
-    firstOrderDays: daysSince(toNumber(pick(raw, ['firstTradeTime', 'firstOrderTime']))) ?? null,
+      toNumber(pick(detail, ['registerDays'])) ??
+      daysSince(toNumber(pick(detail, ['registerTime']))) ??
+      null,
+    firstOrderDays:
+      toNumber(pick(detail, ['firstOrderDays'])) ??
+      daysSince(toNumber(pick(detail, ['firstTradeTime', 'firstOrderTime']))) ??
+      null,
     completionRate: completionRate ?? null,
-    totalOrders:
-      toNumber(pick(s, ['completedOrderNum', 'totalOrderCount', 'orderCount'])) ?? null,
+    totalOrders: totalOrders ?? null,
     orders30d: orders30d ?? null,
+    avgAmountFiat: avgAmountFiat ?? null,
     avgAmount30dFiat: orders30d && amount30d ? Math.round(amount30d / orders30d) : null,
     avgReleaseMinutes: releaseSeconds !== undefined ? Math.round(releaseSeconds / 60) : null,
     avgPayMinutes: paySeconds !== undefined ? Math.round(paySeconds / 60) : null,
-    positiveCount: toNumber(pick(s, ['positiveCount', 'goodAppraiseCount'])) ?? null,
-    negativeCount: toNumber(pick(s, ['negativeCount', 'badAppraiseCount'])) ?? null,
-    merchantLevel: toText(pick(raw, ['merchantLevel', 'userType'])) ?? null,
+    positiveRate: positiveRate ?? null,
+    positiveCount: positiveCount ?? null,
+    negativeCount: negativeCount ?? null,
+    merchantLevel: toText(pick(detail, ['merchantLevel', 'userType'])) ?? null,
   };
 
   return {
     externalId,
-    nickname: toText(pick(raw, ['nickName', 'nickname', 'userName'])),
-    countryCode: toText(pick(raw, ['countryCode', 'country'])),
+    nickname: toText(pick(detail, ['nickName', 'nickname', 'userName'])),
+    countryCode: toText(pick(detail, ['countryCode', 'country'])),
     stats,
   };
 }
 
-/** Достаёт ордер и/или профиль из любого перехваченного ответа. */
+// достаёт ордер и профиль из любого перехваченного ответа
 export function extractFromPayload(
   payload: unknown,
   selfUserNo: string | null,

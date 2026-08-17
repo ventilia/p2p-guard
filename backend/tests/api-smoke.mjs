@@ -1,11 +1,5 @@
-/**
- * Сквозной тест API по живому серверу.
- *
- * Запуск: node tests/api-smoke.mjs   (сервер должен быть поднят)
- *
- * Тест идемпотентен: все идентификаторы уникальны для прогона, поэтому его
- * можно гонять по одной и той же базе сколько угодно раз.
- */
+// сквозной тест по живому серверу: node tests/api-smoke.mjs
+// идентификаторы уникальны для прогона, поэтому гонять можно сколько угодно раз
 const BASE = process.env.API_BASE ?? 'http://localhost:4000/v1';
 const ADMIN_UID = process.env.SEED_ADMIN_UID ?? '100000001';
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'admin12345';
@@ -123,7 +117,7 @@ const dup = await call('/auth/activate', {
 });
 check('повторная активация того же UID → 409', dup.status === 409, dup.json);
 
-// Второй трейдер — нужен, чтобы проверить изоляцию чужих ордеров.
+// второй трейдер нужен для проверки изоляции чужих ордеров
 const other = await call('/auth/activate', {
   method: 'POST',
   body: { token: invite.json.token, binanceUid: otherUid, password: 'otherpass1' },
@@ -191,7 +185,7 @@ check(
 );
 check('ордер записан в личную статистику', lookup.json.orders?.own?.completed === 1, lookup.json.orders);
 
-// Тот же ордер глазами другого трейдера: запись не должна сменить владельца.
+// тот же ордер глазами другого трейдера: владелец не должен смениться
 const foreignLookup = await call('/counterparties/lookup', {
   method: 'POST',
   ...O,
@@ -290,11 +284,218 @@ check(
 );
 check('досье: риск стал критическим', dossier.risk?.level === 'CRITICAL', dossier.risk);
 
-const foreignDossier = (await call(`/counterparties/${cpId}/dossier`, O)).json;
+// сокомандник видит то же, что автор записи — в этом смысл командной базы
+const mateDossier = (await call(`/counterparties/${cpId}/dossier`, O)).json;
+check(
+  'сокомандник видит ЧС и заметку своей команды',
+  mateDossier.blacklist?.length === 1 && !!mateDossier.teamNote?.text,
+  { bl: mateDossier.blacklist?.length, note: mateDossier.teamNote },
+);
+
+// участник другой команды не должен видеть ни ЧС, ни заметку
+const teamB = await call('/admin/teams', {
+  method: 'POST',
+  ...A,
+  body: { name: `Beta ${run}` },
+});
+const inviteB = await call('/admin/tokens', {
+  method: 'POST',
+  ...A,
+  body: { label: 'smoke-foreign', role: 'USER', teamId: teamB.json.id, maxUses: 1 },
+});
+const foreigner = await call('/auth/activate', {
+  method: 'POST',
+  body: { token: inviteB.json.token, binanceUid: uid('4'), password: 'foreignpass1' },
+});
+check(
+  'пользователь другой команды активирован',
+  foreigner.status === 200 && foreigner.json.user.teamId === teamB.json.id,
+  foreigner.json,
+);
+const F = { token: foreigner.json.accessToken, uid: foreigner.json.user.binanceUid };
+
+const foreignDossier = (await call(`/counterparties/${cpId}/dossier`, F)).json;
 check(
   'чужая команда не видит наш ЧС и заметку',
   foreignDossier.blacklist?.length === 0 && foreignDossier.teamNote === null,
   { bl: foreignDossier.blacklist?.length, note: foreignDossier.teamNote },
+);
+check(
+  'но отзывы общие для всех — их чужая команда видит',
+  foreignDossier.reviews?.length === 2,
+  foreignDossier.reviews?.length,
+);
+
+// ───────────────────────────── Теги жалоб ─────────────────────────────
+
+section('Категории жалоб');
+
+const tagged = await call('/reviews', {
+  method: 'POST',
+  ...T,
+  body: { counterpartyId: cpId, rating: 'NEGATIVE', tag: 'SCAM', text: 'Пропал с деньгами' },
+});
+check('отзыв с тегом «мошенник»', tagged.status === 200, tagged.json);
+
+const badTag = await call('/reviews', {
+  method: 'POST',
+  ...T,
+  body: { counterpartyId: cpId, rating: 'NEGATIVE', tag: 'НЕ_СУЩЕСТВУЕТ', text: 'проверка' },
+});
+check('несуществующий тег отклонён', badTag.status === 400, badTag.json);
+
+const taggedDossier = (await call(`/counterparties/${cpId}/dossier`, T)).json;
+check('досье считает теги', taggedDossier.tagCounts?.SCAM === 1, taggedDossier.tagCounts);
+check(
+  'тяжёлый тег добавил фактор риска',
+  (taggedDossier.risk?.factors ?? []).some((f) => f.code === 'SEVERE_COMPLAINTS'),
+  taggedDossier.risk?.factors?.map((f) => f.code),
+);
+check(
+  'тег доехал до самого отзыва',
+  taggedDossier.reviews?.some((r) => r.tag === 'SCAM'),
+  taggedDossier.reviews?.map((r) => r.tag),
+);
+
+// положительный отзыв не должен становиться обвинением и поднимать риск
+const positiveWithTag = await call('/reviews', {
+  method: 'POST',
+  ...O,
+  body: { counterpartyId: cpId, rating: 'POSITIVE', tag: 'SCAM', text: 'Всё прошло отлично' },
+});
+check('положительный отзыв с тегом обвинения принят', positiveWithTag.status === 200, positiveWithTag.json);
+check(
+  'тег обвинения на позитиве схлопнут в комментарий',
+  positiveWithTag.json.tag === 'COMMENT',
+  positiveWithTag.json,
+);
+
+// сумма ордера должна учитываться и при обычном запросе досье
+const withOrder = (await call(`/counterparties/${cpId}/dossier?orderFiat=900000`, T)).json;
+const withoutOrder = (await call(`/counterparties/${cpId}/dossier`, T)).json;
+check(
+  'сумма ордера даёт фактор сравнения со средним чеком',
+  (withOrder.risk?.factors ?? []).some((f) => f.code === 'ORDER_VS_AVG_TICKET'),
+  withOrder.risk?.factors?.map((f) => f.code),
+);
+check(
+  'без суммы ордера этого фактора нет',
+  !(withoutOrder.risk?.factors ?? []).some((f) => f.code === 'ORDER_VS_AVG_TICKET'),
+  withoutOrder.risk?.factors?.map((f) => f.code),
+);
+
+// ───────────────────────────── Вступление в команду ─────────────────────────
+
+section('Вступление в команду');
+
+// пользователь без команды: токен не привязан к команде
+const soloInvite = await call('/admin/tokens', {
+  method: 'POST',
+  ...A,
+  body: { label: 'smoke-solo', role: 'USER', maxUses: 1 },
+});
+const solo = await call('/auth/activate', {
+  method: 'POST',
+  body: { token: soloInvite.json.token, binanceUid: uid('5'), password: 'solopass111' },
+});
+check('одиночка активирован без команды', solo.status === 200 && solo.json.user.teamId === null, solo.json);
+const S = { token: solo.json.accessToken, uid: solo.json.user.binanceUid };
+
+check('без команды /teams/me недоступен', (await call('/teams/me', S)).status === 403);
+
+const joinInvite = await call('/admin/tokens', {
+  method: 'POST',
+  ...A,
+  body: { label: 'smoke-join', role: 'USER', teamId: team.json.id, maxUses: 2 },
+});
+
+const joined = await call('/teams/join', {
+  method: 'POST',
+  ...S,
+  body: { token: joinInvite.json.token },
+});
+check('вступление по токену', joined.status === 200 && joined.json.team.id === team.json.id, joined.json);
+
+const rejoin = await call('/teams/join', { method: 'POST', ...S, body: { token: joinInvite.json.token } });
+check('повторное вступление в ту же команду → 400', rejoin.status === 400, rejoin.json);
+
+const joinedTeam = await call('/teams/me', S);
+check(
+  'после вступления виден состав команды',
+  joinedTeam.status === 200 && joinedTeam.json.members.length >= 3,
+  joinedTeam.json?.members?.length,
+);
+
+// команда уже есть, чужой токен должен упереться в конфликт
+const otherTeamInvite = await call('/admin/tokens', {
+  method: 'POST',
+  ...A,
+  body: { label: 'smoke-other-team', role: 'USER', teamId: teamB.json.id, maxUses: 1 },
+});
+const conflictJoin = await call('/teams/join', {
+  method: 'POST',
+  ...S,
+  body: { token: otherTeamInvite.json.token },
+});
+check(
+  'нельзя состоять сразу в двух командах → 409',
+  conflictJoin.status === 409 && conflictJoin.json.error.code === 'ALREADY_IN_TEAM',
+  conflictJoin.json,
+);
+
+const left = await call('/teams/leave', { method: 'POST', ...S });
+check('выход из команды', left.status === 200, left.json);
+check('после выхода команда недоступна', (await call('/teams/me', S)).status === 403);
+
+check(
+  'битый токен не пускает',
+  (await call('/teams/join', { method: 'POST', ...S, body: { token: 'x'.repeat(24) } })).status === 401,
+);
+
+// ───────────────────── Пользователь создаёт свою команду ─────────────────────
+
+section('Своя команда');
+
+const own = await call('/teams', { method: 'POST', ...S, body: { name: `Своя ${run}` } });
+check(
+  'пользователь создал команду и стал тимлидом',
+  own.status === 200 && own.json.role === 'TEAM_LEAD' && !!own.json.team?.id,
+  own.json,
+);
+
+const me = await call('/me', S);
+check('команда попала в профиль', me.json.user?.teamId === own.json.team.id, me.json.user);
+check('роль в профиле обновилась', me.json.user?.role === 'TEAM_LEAD', me.json.user);
+
+const secondTeam = await call('/teams', { method: 'POST', ...S, body: { name: `Вторая ${run}` } });
+check(
+  'вторую команду создать нельзя → 409',
+  secondTeam.status === 409 && secondTeam.json.error.code === 'ALREADY_IN_TEAM',
+  secondTeam.json,
+);
+
+// одинаковые названия не должны ронять создание: slug получает суффикс
+const soloInvite2 = await call('/admin/tokens', {
+  method: 'POST',
+  ...A,
+  body: { label: 'smoke-solo-2', role: 'USER', maxUses: 1 },
+});
+const solo2 = await call('/auth/activate', {
+  method: 'POST',
+  body: { token: soloInvite2.json.token, binanceUid: uid('6'), password: 'solopass222' },
+});
+const S2 = { token: solo2.json.accessToken, uid: solo2.json.user.binanceUid };
+
+const dupName = await call('/teams', { method: 'POST', ...S2, body: { name: `Своя ${run}` } });
+check(
+  'команда с тем же названием создаётся с другим slug',
+  dupName.status === 200 && dupName.json.team.slug !== own.json.team.slug,
+  { a: own.json.team?.slug, b: dupName.json.team?.slug },
+);
+
+check(
+  'новый тимлид может выдать токен',
+  (await call('/teams/me/invites', { method: 'POST', ...S, body: { maxUses: 1 } })).status === 200,
 );
 
 // ───────────────────────────── Ордера ─────────────────────────────

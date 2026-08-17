@@ -5,18 +5,13 @@ import { prisma } from '../db.js';
 import { auditFromRequest } from '../lib/audit.js';
 import { hashPassword, randomToken, sha256 } from '../lib/crypto.js';
 import { badRequest, conflict, notFound } from '../lib/errors.js';
+import { slugify } from '../lib/slug.js';
 
 const paging = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-const slugify = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9а-я]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
 
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const admin = { preHandler: [app.authenticate, app.requireRole(Role.ADMIN)] };
@@ -92,7 +87,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       prisma.user.count({ where }),
     ]);
 
-    // Объём считаем одним запросом на страницу, а не по пользователю в цикле.
+    // объём считаем одним запросом на страницу, а не по пользователю в цикле
     const volumes = await prisma.order.groupBy({
       by: ['userId'],
       where: { userId: { in: items.map((u) => u.id) }, status: 'COMPLETED' },
@@ -130,7 +125,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  /** Карточка пользователя: объём, статусы сделок и с кем он торговал. */
+  // карточка: объём, статусы сделок и с кем торговал
   app.get('/admin/users/:id', admin, async (req) => {
     const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
 
@@ -257,7 +252,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         where: { id },
         data: { status: 'BLOCKED', blockReason: body.reason },
       }),
-      // Блокировка должна действовать сразу — гасим все сессии.
+      // блокировка должна действовать сразу, гасим все сессии
       prisma.refreshToken.updateMany({
         where: { userId: id, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -330,7 +325,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  /** Подписка: продлить / выдать план / отменить. Сейчас все на FREE. */
+  // продлить, выдать план или отменить, сейчас все на FREE
   app.post('/admin/users/:id/subscription', admin, async (req) => {
     const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
     const body = z
@@ -358,7 +353,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       };
     } else {
       if (!body.days) throw badRequest('Для продления укажите количество дней');
-      // Продлеваем от текущей даты окончания, если она в будущем.
+      // продлеваем от текущей даты окончания, если она в будущем
       const base =
         user.subscriptionUntil && user.subscriptionUntil.getTime() > Date.now()
           ? user.subscriptionUntil.getTime()
@@ -422,7 +417,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
         usedAt: t.usedAt,
         createdAt: t.createdAt,
         createdBy: t.createdBy?.binanceUid ?? null,
-        // Сырой токен не хранится, показать повторно нельзя
+        // сырой токен не хранится, показать повторно нельзя
         status: t.revokedAt
           ? 'REVOKED'
           : t.expiresAt && t.expiresAt.getTime() < Date.now()
@@ -475,7 +470,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       meta: { role: body.role, teamId: body.teamId, maxUses: body.maxUses },
     });
 
-    // Сырое значение отдаём ровно один раз.
+    // сырое значение отдаём ровно один раз
     return { id: invite.id, token, expiresAt: invite.expiresAt, maxUses: invite.maxUses };
   });
 
@@ -532,7 +527,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       .object({
         name: z.string().trim().min(2).max(64),
         slug: z.string().trim().max(40).optional(),
-        /** UID будущего тимлида: он получит роль TEAM_LEAD и войдёт в команду. */
+        // UID будущего тимлида: получит роль TEAM_LEAD и войдёт в команду
         ownerUid: z.string().trim().regex(/^\d{5,20}$/).optional(),
       })
       .parse(req.body);

@@ -9,7 +9,7 @@ import { AppError } from '../lib/errors.js';
 
 export async function registerSecurity(app: FastifyInstance): Promise<void> {
   await app.register(helmet, {
-    // API не отдаёт HTML, CSP тут только мешает
+// API не отдаёт HTML, CSP тут только мешает
     contentSecurityPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
@@ -17,7 +17,7 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
   await app.register(cors, {
     credentials: true,
     origin(origin, cb) {
-      // Запросы без Origin (curl, background service worker в части случаев)
+      // запросы без Origin: curl и service worker в части случаев
       if (!origin) return cb(null, true);
       if (env.corsOrigins.includes(origin)) return cb(null, true);
       if (env.ALLOW_ANY_EXTENSION_ORIGIN && origin.startsWith('chrome-extension://')) {
@@ -32,9 +32,8 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
     global: true,
     max: 600,
     timeWindow: '1 minute',
-    // Лимитер работает в onRequest — req.auth к этому моменту ещё не заполнен,
-    // поэтому различаем клиентов по самому токену (за одним NAT может сидеть
-    // целая команда, и общий лимит по IP бил бы по всем сразу).
+    // req.auth в onRequest ещё пуст, а за одним NAT сидит целая команда —
+    // поэтому различаем клиентов по токену, а не по IP
     keyGenerator: (req) => {
       const header = req.headers.authorization;
       if (header?.startsWith('Bearer ')) return `t:${sha256(header.slice(7))}`;
@@ -64,7 +63,7 @@ export function registerErrorHandler(app: FastifyInstance): void {
       });
     }
 
-    // Ошибки самого fastify (парсинг тела, лимиты, 404 роутера и т.п.)
+    // ошибки самого fastify: парсинг тела, лимиты, 404 роутера
     const fastifyError = error as { statusCode?: number; code?: string; message?: string };
     const statusCode = typeof fastifyError.statusCode === 'number' ? fastifyError.statusCode : 500;
 

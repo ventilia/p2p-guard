@@ -1,10 +1,5 @@
-/**
- * Content script: монтирует панель в Shadow DOM, пересылает в background
- * перехваченные страницей данные и снимает запасной слепок с вёрстки.
- *
- * В наш API отсюда не ходим — весь сетевой обмен только через background,
- * чтобы токен доступа не оказался в контексте страницы биржи.
- */
+// монтирует панель в Shadow DOM и пересылает перехваченное в background
+// в наш API отсюда не ходим, иначе токен окажется в контексте страницы биржи
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.js';
@@ -15,10 +10,7 @@ import type { DomSnapshot } from '../shared/types.js';
 const HOST_ID = 'p2p-guard-root';
 const CHANNEL = 'p2p-guard';
 
-/**
- * Хук должен встать ДО первых запросов страницы, поэтому вставляем его
- * синхронно в самое начало документа.
- */
+// хук должен встать до первых запросов страницы, поэтому синхронно и в начало
 function injectPageHook(): void {
   try {
     const script = document.createElement('script');
@@ -41,7 +33,8 @@ function mountPanel(): void {
   const shadow = host.attachShadow({ mode: 'open' });
 
   const style = document.createElement('style');
-  style.textContent = panelStyles;
+  // URL шрифта берём в рантайме: относительный путь ушёл бы на домен биржи
+  style.textContent = panelStyles(chrome.runtime.getURL('fonts/IBMPlexSans.ttf'));
   shadow.appendChild(style);
 
   const container = document.createElement('div');
@@ -108,10 +101,7 @@ const orderIdFromUrl = (url: string): string | null =>
 
 // ───────────────────────────── Запасной разбор DOM ─────────────────────────────
 
-/**
- * Если приватный API недоступен, ник и UID контрагента всё равно есть на
- * странице: Binance ставит ссылку на профиль с advertiserNo/userNo.
- */
+// если API недоступен, ник и UID всё равно есть в ссылке на профиль
 function scrapeDom(): DomSnapshot | null {
   const snapshot: DomSnapshot = {};
 
@@ -131,7 +121,7 @@ function scrapeDom(): DomSnapshot | null {
   }
 
   if (!snapshot.counterpartyUid) {
-    // Запасной вариант: «UID 421044135» где-нибудь в тексте карточки.
+    // запасной вариант: «UID 421044135» где-нибудь в тексте
     const match = /UID[:\s]+([0-9]{6,20})/i.exec(document.body?.innerText?.slice(0, 20_000) ?? '');
     if (match?.[1]) snapshot.counterpartyUid = match[1];
   }
@@ -156,10 +146,7 @@ function scheduleScrape(): void {
   }, 800);
 }
 
-/**
- * Наблюдаем за DOM «дёшево»: слушаем только добавление узлов и всё равно
- * схлопываем всплеск изменений в один отложенный разбор.
- */
+// слушаем только добавление узлов и схлопываем всплеск в один разбор
 function watchDom(): void {
   const observer = new MutationObserver(() => scheduleScrape());
   const target = document.body ?? document.documentElement;

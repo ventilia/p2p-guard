@@ -6,7 +6,7 @@ import { badRequest, forbidden, notFound } from '../lib/errors.js';
 
 const createSchema = z.object({
   counterpartyId: z.string().min(1),
-  /** GLOBAL добавляет только админ: это общая база, туда нельзя пускать всех. */
+  // в GLOBAL пишет только админ, это общая база на всех
   scope: z.enum(['GLOBAL', 'TEAM']).default('TEAM'),
   reason: z.string().trim().min(3, 'Опишите причину').max(1000),
   severity: z.number().int().min(1).max(3).default(2),
@@ -32,7 +32,7 @@ export async function blacklistRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!counterparty) throw notFound('Контрагент не найден');
 
-    // Повторное добавление не плодит дубли — обновляем действующую запись.
+    // повторное добавление не плодит дубли, обновляем действующую запись
     const existing = await prisma.blacklistEntry.findFirst({
       where: {
         counterpartyId: counterparty.id,
@@ -91,7 +91,7 @@ export async function blacklistRoutes(app: FastifyInstance): Promise<void> {
     return { ok: true };
   });
 
-  /** Лента ЧС: общий + свой командный. */
+  // лента: общий ЧС плюс свой командный
   app.get('/blacklist', auth, async (req) => {
     const { limit, offset } = z
       .object({

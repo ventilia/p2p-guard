@@ -4,10 +4,10 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { maskUid, maskRequisite, normalizeDigits } from '../lib/crypto.js';
 import { notFound } from '../lib/errors.js';
-import { calculateRisk } from '../lib/risk.js';
+import { calculateRisk, type ReviewTag } from '../lib/risk.js';
 import type { AuthContext } from '../plugins/auth.js';
 
-/** Снимок публичной статистики с биржи — то, что расширение сумело вытащить. */
+// снимок публичной статистики биржи — всё, что расширение сумело вытащить
 const statsSchema = z
   .object({
     registeredDays: z.number().int().nonnegative().nullish(),
@@ -19,6 +19,7 @@ const statsSchema = z
     avgAmount30dFiat: z.number().nonnegative().nullish(),
     avgReleaseMinutes: z.number().nonnegative().nullish(),
     avgPayMinutes: z.number().nonnegative().nullish(),
+    positiveRate: z.number().min(0).max(1).nullish(),
     positiveCount: z.number().int().nonnegative().nullish(),
     negativeCount: z.number().int().nonnegative().nullish(),
     activeOrders: z.number().int().nonnegative().nullish(),
@@ -68,17 +69,20 @@ const summarize = (c: StatusCounts) => ({
   active: c.PENDING + c.PAID + c.APPEALING,
 });
 
-/**
- * Собирает полное досье: ЧС, отзывы, заметку команды, статистику сделок,
- * реквизиты и риск-скор. Всё, что видит карточка расширения.
- */
-export async function buildDossier(counterparty: Counterparty, auth: AuthContext) {
+// всё, что видит карточка: ЧС, отзывы, заметка команды, сделки, реквизиты, риск
+export async function buildDossier(
+  counterparty: Counterparty,
+  auth: AuthContext,
+  // сумма открытого ордера, риск-скор сравнивает её со средним чеком
+  currentOrderFiat?: number | null,
+) {
   const teamId = auth.teamId;
 
   const [
     blacklist,
     reviews,
     reviewCountRows,
+    reviewTagRows,
     note,
     marketRows,
     teamRows,
@@ -103,10 +107,16 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
         include: { author: { select: { id: true, binanceUid: true, teamId: true } } },
       }),
 
-      // Счётчики считаем отдельно: список отзывов ограничен сотней,
-      // и по нему нельзя судить об общем балансе позитива и негатива.
+      // список отзывов ограничен сотней, по нему нельзя судить о балансе
       prisma.review.groupBy({
         by: ['rating'],
+        where: { counterpartyId: counterparty.id },
+        _count: { _all: true },
+      }),
+
+      // категории жалоб весят в риск-скоре отдельно, поэтому считаем по всей базе
+      prisma.review.groupBy({
+        by: ['tag'],
         where: { counterpartyId: counterparty.id },
         _count: { _all: true },
       }),
@@ -153,8 +163,7 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
       }),
     ]);
 
-  // Реквизит считается «грязным», если он же засветился у другого контрагента,
-  // который лежит в глобальном ЧС.
+  // реквизит «грязный», если засветился у другого контрагента из глобального ЧС
   const requisiteIds = reqLinks.map((l) => l.requisiteId);
   const flaggedLinks = requisiteIds.length
     ? await prisma.counterpartyRequisite.findMany({
@@ -187,6 +196,10 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
     negative: countByRating('NEGATIVE'),
   };
 
+  const tagCounts = Object.fromEntries(
+    reviewTagRows.map((r) => [r.tag, r._count._all]),
+  ) as Partial<Record<ReviewTag, number>>;
+
   const stats = (counterparty.exchangeStats ?? {}) as ExchangeStatsSnapshot;
 
   const market = summarize(marketCounts);
@@ -198,15 +211,22 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
     teamBlacklist: blacklist.filter((b) => b.scope === 'TEAM').length,
     blacklistedRequisites: flaggedByRequisite.size,
     reviews: reviewCounts,
+    reviewTags: tagCounts,
     orders: { total: market.total, completed: market.completed, cancelled: market.cancelled },
     teamOrders: { total: team.total, completed: team.completed },
+    currentOrderFiat: currentOrderFiat ?? null,
     exchange: {
       registeredDays: stats.registeredDays ?? null,
+      firstOrderDays: stats.firstOrderDays ?? null,
       completionRate: stats.completionRate ?? null,
       totalOrders: stats.totalOrders ?? null,
+      orders30d: stats.orders30d ?? null,
       avgReleaseMinutes: stats.avgReleaseMinutes ?? null,
       avgPayMinutes: stats.avgPayMinutes ?? null,
       avgAmountFiat: stats.avgAmountFiat ?? null,
+      avgAmount30dFiat: stats.avgAmount30dFiat ?? null,
+      positiveCount: stats.positiveCount ?? null,
+      negativeCount: stats.negativeCount ?? null,
     },
   });
 
@@ -236,15 +256,17 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
     reviews: reviews.map((r) => ({
       id: r.id,
       rating: r.rating,
+      tag: r.tag,
       text: r.text,
       createdAt: r.createdAt,
-      // Личность автора не раскрываем — как в аналоге, показываем маску UID.
+      // личность автора не раскрываем
       author: `P2P Guard (UID ${maskUid(r.author.binanceUid)})`,
       isOwn: r.authorId === auth.user.id,
       isTeam: Boolean(teamId && r.author.teamId === teamId),
       canDelete: auth.isAdmin || r.authorId === auth.user.id,
     })),
     reviewCounts,
+    tagCounts,
     teamNote: note
       ? {
           text: note.text,
@@ -287,7 +309,7 @@ export async function buildDossier(counterparty: Counterparty, auth: AuthContext
 
 export type Dossier = Awaited<ReturnType<typeof buildDossier>>;
 
-/** Upsert контрагента + мягкое обновление снимка биржевой статистики. */
+// upsert контрагента с мягким обновлением снимка статистики
 export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
   const now = new Date();
   const base = {
@@ -316,7 +338,7 @@ export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
 export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
   const auth = { preHandler: [app.authenticate, app.requireSubscription] };
 
-  /** Главный вызов расширения при открытии ордера. */
+  // главный вызов расширения при открытии ордера
   app.post('/counterparties/lookup', auth, async (req) => {
     const body = lookupSchema.parse(req.body);
     const ctx = req.auth!;
@@ -350,8 +372,7 @@ export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
           },
         });
       } else if (existing.userId === ctx.user.id) {
-        // Чужую запись не трогаем: владелец ордера — тот, кто его создал.
-        // Иначе ордер «переезжал» бы в команду случайного зрителя.
+        // чужую запись не трогаем, иначе ордер переедет к случайному зрителю
         await prisma.order.update({
           where: { id: existing.id },
           data: {
@@ -364,17 +385,23 @@ export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    return buildDossier(counterparty, ctx);
+    return buildDossier(counterparty, ctx, body.order?.amountFiat ?? null);
   });
 
   app.get('/counterparties/:id/dossier', auth, async (req) => {
     const { id } = z.object({ id: z.string().min(1) }).parse(req.params);
+    // сумму открытого ордера принимаем и здесь: без неё фактор сравнения с
+    // средним чеком пропадал при каждом обновлении, и балл менялся сам собой
+    const { orderFiat } = z
+      .object({ orderFiat: z.coerce.number().nonnegative().optional() })
+      .parse(req.query);
+
     const counterparty = await prisma.counterparty.findUnique({ where: { id } });
     if (!counterparty) throw notFound('Контрагент не найден');
-    return buildDossier(counterparty, req.auth!);
+    return buildDossier(counterparty, req.auth!, orderFiat ?? null);
   });
 
-  /** Поиск по нику / UID / реквизиту — для ручной проверки из попапа. */
+  // поиск по нику, UID или реквизиту для ручной проверки из попапа
   app.get('/counterparties/search', auth, async (req) => {
     const { q, limit } = z
       .object({ q: z.string().trim().min(2).max(64), limit: z.coerce.number().int().min(1).max(50).default(20) })
@@ -422,7 +449,7 @@ export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  /** Реквизиты, замеченные в чате ордера. */
+  // реквизиты, замеченные в чате ордера
   app.post('/requisites/observe', auth, async (req) => {
     const body = z
       .object({

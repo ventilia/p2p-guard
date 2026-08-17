@@ -7,7 +7,7 @@ const bodySchema = z.object({
   title: z.string().trim().min(1).max(120),
   body: z.string().trim().min(1).max(2000),
   position: z.number().int().min(0).max(999).default(0),
-  /** Шаблон команды видят все её участники, создаёт тимлид/админ. */
+  // шаблон команды видят все участники, создаёт тимлид или админ
   shared: z.boolean().default(false),
 });
 

@@ -34,11 +34,11 @@ type TokenPair = {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
-  /** id записи refresh-токена — нужен для цепочки ротации. */
+  // id записи refresh-токена, нужен для цепочки ротации
   refreshTokenId: string;
 };
 
-/** Выпускает access + refresh. familyId связывает цепочку ротаций одного устройства. */
+// familyId связывает цепочку ротаций одного устройства
 async function issueTokens(
   app: FastifyInstance,
   req: FastifyRequest,
@@ -73,13 +73,12 @@ async function issueTokens(
     accessToken,
     refreshToken,
     refreshTokenId: stored.id,
-    // TTL берём из той же настройки, которой подписан JWT, — иначе клиент
-    // будет считать токен живым дольше, чем он есть.
+    // TTL из той же настройки, которой подписан JWT, иначе клиент промахнётся
     expiresIn: parseDurationSeconds(env.ACCESS_TOKEN_TTL),
   };
 }
 
-/** Наружу отдаём только сами токены — внутренний id записи клиенту не нужен. */
+// наружу только сами токены, внутренний id записи клиенту не нужен
 const publicTokens = ({ accessToken, refreshToken, expiresIn }: TokenPair) => ({
   accessToken,
   refreshToken,
@@ -103,7 +102,7 @@ function publicUser(user: User) {
 }
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
-  // Логин-эндпоинты брутфорсятся — отдельный жёсткий лимит.
+  // логин брутфорсят, поэтому отдельный жёсткий лимит
   const strictLimit = {
     config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
   };
@@ -170,7 +169,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const body = loginSchema.parse(req.body);
 
     const user = await prisma.user.findUnique({ where: { binanceUid: body.binanceUid } });
-    // Одинаковый ответ для «нет пользователя» и «неверный пароль» — не даём перебирать UID.
+    // ответ одинаковый для «нет пользователя» и «неверный пароль», иначе переберут UID
     if (!user || !(await verifyPassword(body.password, user.passwordHash))) {
       throw unauthorized('Неверный UID или пароль', 'BAD_CREDENTIALS');
     }
@@ -193,8 +192,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!stored) throw unauthorized('Сессия не найдена', 'REFRESH_INVALID');
 
-    // Повторное предъявление уже отозванного токена — признак кражи:
-    // гасим всю семью, пользователь перелогинится.
+    // повторное предъявление отозванного токена — признак кражи, гасим всю семью
     if (stored.revokedAt) {
       await prisma.refreshToken.updateMany({
         where: { familyId: stored.familyId, revokedAt: null },
@@ -274,7 +272,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       where: { id: auth.user.id },
       data: { passwordHash: await hashPassword(body.newPassword) },
     });
-    // Смена пароля закрывает все прочие сессии.
+    // смена пароля закрывает все прочие сессии
     await prisma.refreshToken.updateMany({
       where: { userId: auth.user.id, revokedAt: null },
       data: { revokedAt: new Date() },

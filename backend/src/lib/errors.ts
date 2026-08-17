@@ -1,7 +1,4 @@
-/**
- * Единый формат ошибок API: { error: { code, message, details? } }.
- * Код — машиночитаемый, расширение реагирует именно на него.
- */
+// единый формат { error: { code, message, details? } }, расширение реагирует на code
 export class AppError extends Error {
   readonly statusCode: number;
   readonly code: string;

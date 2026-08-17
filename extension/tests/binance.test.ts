@@ -189,6 +189,131 @@ describe('normalizeUserDetail', () => {
   it('без userNo возвращает null', () => {
     assert.equal(normalizeUserDetail({ nickName: 'нет UID' }), null);
   });
+
+  /**
+   * Средний чек биржа готовым не отдаёт — его считаем сами, как и аналог
+   * на Bybit: весь оборот делим на число завершённых сделок.
+   */
+  it('считает общий средний чек из оборота и числа сделок', () => {
+    const snapshot = normalizeUserDetail({
+      userNo: 'avg-1',
+      nickName: 'aminexh',
+      userStatsRet: {
+        totalFinishCount: 295,
+        totalTradeAmount: 4_411_725,
+      },
+    });
+
+    assert.equal(snapshot?.stats?.totalOrders, 295);
+    assert.equal(snapshot?.stats?.avgAmountFiat, 14_955);
+  });
+
+  it('не делит на ноль, если сделок ещё не было', () => {
+    const snapshot = normalizeUserDetail({
+      userNo: 'avg-2',
+      nickName: 'новичок',
+      userStatsRet: { totalFinishCount: 0, totalTradeAmount: 0 },
+    });
+
+    assert.equal(snapshot?.stats?.avgAmountFiat, null);
+  });
+
+  /**
+   * Форма ответа profile-and-ads-list: профиль лежит в userDetailVo.
+   * Имена полей сверены с внешними источниками (см. README).
+   */
+  it('разбирает ответ profile-and-ads-list с userDetailVo', () => {
+    const snapshot = normalizeUserDetail({
+      userNo: 'adv-777',
+      userDetailVo: {
+        userNo: 'adv-777',
+        nickName: 'sdwrus',
+        countryCode: 'LKA',
+        registerDays: 976,
+        userType: 'MERCHANT',
+        monthOrderCount: 12,
+        monthFinishRate: 98.5,
+        positiveRate: 0.98,
+        completedOrderNumOfLatest30day: 12,
+      },
+    });
+
+    assert.equal(snapshot?.externalId, 'adv-777');
+    assert.equal(snapshot?.nickname, 'sdwrus');
+    assert.equal(snapshot?.countryCode, 'LKA');
+    assert.equal(snapshot?.stats?.registeredDays, 976);
+    assert.equal(snapshot?.stats?.orders30d, 12);
+    assert.equal(snapshot?.stats?.completionRate, 0.985);
+    assert.equal(snapshot?.stats?.positiveRate, 0.98);
+    assert.equal(snapshot?.stats?.merchantLevel, 'MERCHANT');
+  });
+
+  it('positiveRate в процентах тоже приводится к доле', () => {
+    const snapshot = normalizeUserDetail({ userNo: 'p', nickName: 'n', positiveRate: 98 });
+    assert.equal(snapshot?.stats?.positiveRate, 0.98);
+  });
+
+  it('firstOrderDays берётся напрямую, если биржа его отдала', () => {
+    const snapshot = normalizeUserDetail({ userNo: 'f', nickName: 'n', firstOrderDays: 7 });
+    assert.equal(snapshot?.stats?.firstOrderDays, 7);
+  });
+});
+
+/**
+ * Статусы из официальной документации C2C (listUserOrderHistory).
+ * Если Binance добавит новый — тест не поймает, но регресс по этим восьми поймает.
+ */
+describe('официальные статусы C2C покрыты', () => {
+  const OFFICIAL = {
+    PENDING: 'PENDING',
+    TRADING: 'PENDING',
+    BUYER_PAYED: 'PAID',
+    DISTRIBUTING: 'PAID',
+    COMPLETED: 'COMPLETED',
+    IN_APPEAL: 'APPEALING',
+    CANCELLED: 'CANCELLED',
+    CANCELLED_BY_SYSTEM: 'CANCELLED',
+  } as const;
+
+  it('каждый документированный статус распознан', () => {
+    for (const [raw, expected] of Object.entries(OFFICIAL)) {
+      assert.equal(normalizeStatus(raw), expected, `статус ${raw}`);
+    }
+  });
+});
+
+/** Поля ордера из официальной документации listUserOrderHistory. */
+describe('официальная форма ордера C2C', () => {
+  it('разбирает запись истории сделок как есть', () => {
+    const parsed = normalizeOrderDetail(
+      {
+        orderNumber: '22467508508467200000',
+        advNo: '11111111111111111111',
+        tradeType: 'SELL',
+        asset: 'BTC',
+        fiat: 'EUR',
+        fiatSymbol: '€',
+        amount: '0.00110000',
+        totalPrice: '35.00',
+        unitPrice: '31818.18',
+        orderStatus: 'COMPLETED',
+        createTime: 1619361369000,
+        counterPartNickName: 'ab***',
+        advertisementRole: 'TAKER',
+      },
+      null,
+    );
+
+    assert.equal(parsed.order.externalId, '22467508508467200000');
+    assert.equal(parsed.order.side, 'SELL');
+    assert.equal(parsed.order.status, 'COMPLETED');
+    assert.equal(parsed.order.asset, 'BTC');
+    assert.equal(parsed.order.fiat, 'EUR');
+    assert.equal(parsed.order.amountFiat, 35);
+    assert.equal(parsed.order.amountAsset, 0.0011);
+    assert.equal(parsed.order.price, 31818.18);
+    assert.equal(parsed.order.createdAtExchange, new Date(1619361369000).toISOString());
+  });
 });
 
 describe('извлечение из перехваченного ответа', () => {

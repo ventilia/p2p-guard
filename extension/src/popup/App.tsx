@@ -1,17 +1,74 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { sendMessage } from '../shared/messages.js';
-import type { Session, Settings } from '../shared/types.js';
+import {
+  IconAlert,
+  IconArrowLeft,
+  IconCheck,
+  IconCopy,
+  IconInfo,
+  IconLogout,
+  IconNote,
+  IconPlus,
+  IconRefresh,
+  IconSearch,
+  IconSettings,
+  IconTrash,
+  IconUser,
+  IconUsers,
+  LogoMark,
+} from '../shared/icons.js';
+import { clearPopupState, loadPopupState, savePopupState, type PopupTab } from './state.js';
+import { fmtDate, fmtMoney, fmtNumber, initialOf } from '../shared/format.js';
+import { DossierView, type DossierActions } from '../ui/dossier.js';
+import type {
+  Dossier,
+  MessageTemplate,
+  ReviewRating,
+  ReviewTag,
+  Session,
+  Settings,
+} from '../shared/types.js';
 
 type SessionResponse = { session: Session | null; settings: Settings };
+
+type TabStatusData = {
+  isBinance: boolean;
+  orderId: string | null;
+  counterpartyNick: string | null;
+};
+
+type BinanceSessionData = {
+  loggedIn: boolean;
+  hasPageHeaders: boolean;
+  browserUid: string | null;
+  accountUid: string | null;
+  mismatch: boolean;
+};
+
+type Tab = PopupTab;
+
+const TABS: { key: Tab; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
+  { key: 'check', label: 'Проверка', Icon: IconSearch },
+  { key: 'team', label: 'Команда', Icon: IconUsers },
+  { key: 'templates', label: 'Шаблоны', Icon: IconNote },
+  { key: 'settings', label: 'Настройки', Icon: IconSettings },
+];
 
 export function App() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [tab, setTabState] = useState<Tab>('check');
+  const [restored, setRestored] = useState<{ query: string; dossier: Dossier | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const reload = async () => {
+  const setTab = useCallback((next: Tab) => {
+    setTabState(next);
+    savePopupState({ tab: next });
+  }, []);
+
+  const reload = useCallback(async () => {
     const response = await sendMessage<SessionResponse>({ type: 'GET_SESSION' });
     if (response.ok) {
       setSession(response.data.session);
@@ -20,11 +77,20 @@ export function App() {
       setError(response.error.message);
     }
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    void reload();
-  }, []);
+    // параллельно: попап должен открываться сразу, а не в два ожидания
+    void Promise.all([reload(), loadPopupState()]).then(([, saved]) => {
+      setTabState(saved.tab);
+      setRestored({ query: saved.query, dossier: saved.dossier });
+    });
+  }, [reload]);
+
+  // попап — обычная страница, Shadow DOM тут нет, тема живёт на <html>
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings?.theme ?? 'light';
+  }, [settings?.theme]);
 
   const patchSettings = async (patch: Partial<Settings>) => {
     const response = await sendMessage<Settings>({ type: 'SET_SETTINGS', patch });
@@ -33,50 +99,271 @@ export function App() {
 
   if (loading) {
     return (
-      <div className="wrap">
+      <div className="center">
+        <div className="spinner" />
         <div className="muted">Загрузка…</div>
       </div>
     );
   }
 
-  return (
-    <div className="wrap">
-      <div className="head">
-        <div className="logo">PG</div>
-        <div>
-          <div className="title">P2P Guard</div>
-          <div className="muted">Досье контрагентов Binance P2P</div>
+  if (!session) {
+    return (
+      <div className="shell">
+        <Top />
+        <div className="content">
+          <AuthForm
+            settings={settings}
+            onSettings={patchSettings}
+            onDone={async () => {
+              setNotice('Готово, панель включена');
+              await reload();
+            }}
+          />
         </div>
       </div>
+    );
+  }
 
-      {error ? <div className="error" onClick={() => setError(null)}>{error}</div> : null}
-      {notice ? <div className="ok" onClick={() => setNotice(null)}>{notice}</div> : null}
+  return (
+    <div className="shell">
+      <Top />
 
-      {session ? (
-        <Account
-          session={session}
-          settings={settings}
-          onSettings={patchSettings}
-          onNotice={setNotice}
-          onError={setError}
-          onLogout={async () => {
-            await sendMessage({ type: 'AUTH_LOGOUT' });
-            setSession(null);
-            setNotice('Вы вышли из аккаунта');
-          }}
-        />
-      ) : (
-        <AuthForm
-          settings={settings}
-          onSettings={patchSettings}
-          onError={setError}
-          onSuccess={async () => {
-            setError(null);
-            setNotice('Готово, панель включена');
-            await reload();
-          }}
-        />
-      )}
+      <div className="tabs">
+        {TABS.map((t) => (
+          <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
+            <t.Icon size={14} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="content">
+        {error ? (
+          <div className="alert bad" onClick={() => setError(null)}>
+            <IconAlert size={15} />
+            <span>{error}</span>
+          </div>
+        ) : null}
+        {notice ? (
+          <div className="alert ok" onClick={() => setNotice(null)}>
+            <IconCheck size={15} />
+            <span>{notice}</span>
+          </div>
+        ) : null}
+
+        {tab === 'check' ? (
+          <>
+            <BinanceSessionCard
+              accountUid={session.user.binanceUid}
+              isAdmin={session.user.role === 'ADMIN'}
+            />
+            <TabStatus
+              panelEnabled={settings?.panelEnabled ?? false}
+              onEnable={() => {
+                void patchSettings({ panelEnabled: true });
+                setNotice('Панель включена. Обновите страницу ордера.');
+              }}
+            />
+            <CheckTab
+              session={session}
+              onError={setError}
+              initialQuery={restored?.query ?? ''}
+              initialDossier={restored?.dossier ?? null}
+            />
+          </>
+        ) : null}
+        {tab === 'team' ? (
+          <TeamTab session={session} onError={setError} onNotice={setNotice} onReload={reload} />
+        ) : null}
+        {tab === 'templates' ? <TemplatesTab onError={setError} onNotice={setNotice} /> : null}
+        {tab === 'settings' ? (
+          <SettingsTab
+            session={session}
+            settings={settings}
+            onSettings={patchSettings}
+            onError={setError}
+            onNotice={setNotice}
+            onLogout={async () => {
+              await sendMessage({ type: 'AUTH_LOGOUT' });
+              // кэш привязан к аккаунту, чужое досье показывать нельзя
+              await clearPopupState();
+              setRestored({ query: '', dossier: null });
+              setSession(null);
+              setNotice('Вы вышли из аккаунта');
+            }}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function Top() {
+  return (
+    <div className="top">
+      <LogoMark size={28} />
+      <div>
+        <div className="brand-name">P2P Guard</div>
+        <div className="brand-sub">досье контрагентов Binance P2P</div>
+      </div>
+    </div>
+  );
+}
+
+// без сессии биржи статистики не будет, и это надо показать явно
+// пароль не спрашиваем: кнопка ведёт на настоящую страницу входа Binance
+function BinanceSessionCard({ accountUid, isAdmin }: { accountUid: string; isAdmin: boolean }) {
+  const [state, setState] = useState<BinanceSessionData | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    const r = await sendMessage<BinanceSessionData>({ type: 'GET_BINANCE_SESSION' });
+    setChecking(false);
+    if (r.ok) setState(r.data);
+  }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
+
+  if (!state) return null;
+
+  if (!state.loggedIn) {
+    return (
+      <div className="card">
+        <div className="card-title">
+          <IconAlert size={13} /> Вы не вошли в Binance
+        </div>
+        <div className="hint" style={{ marginBottom: 9 }}>
+          Расширение запрашивает статистику контрагентов под вашей сессией биржи. Пока вы не вошли
+          на binance.com, биржа не отдаст ни средний чек, ни число сделок — останутся только наши
+          отзывы и чёрный список.
+        </div>
+        <button
+          className="btn primary block"
+          onClick={() => void sendMessage({ type: 'OPEN_BINANCE_LOGIN' })}
+        >
+          Войти в Binance
+        </button>
+        <div className="hint" style={{ marginTop: 8 }}>
+          Откроется настоящая страница входа Binance. Пароль от биржи мы не спрашиваем и не храним.
+        </div>
+        <button className="btn ghost block" style={{ marginTop: 6 }} disabled={checking} onClick={() => void check()}>
+          <IconRefresh size={14} /> {checking ? 'Проверяем…' : 'Я вошёл, проверить'}
+        </button>
+      </div>
+    );
+  }
+
+  if (state.mismatch) {
+    return (
+      <div className="card">
+        <div className="card-title">
+          <IconAlert size={13} /> Разные аккаунты
+        </div>
+        <div className="hint">
+          В браузере вы вошли в Binance под UID <b className="mono">{state.browserUid}</b>, а учётная
+          запись расширения привязана к <b className="mono">{accountUid}</b>. Запросы к бирже уйдут
+          от первого, а отзывы и сделки запишутся на второй.
+        </div>
+        {isAdmin ? (
+          // учётка из seed: её UID синтетический и с биржей совпасть не может
+          <div className="hint" style={{ marginTop: 7 }}>
+            Похоже, вы вошли <b>учётной записью администратора</b> — она только для админ-панели, её
+            UID не относится к бирже. Для торговли заведите отдельную учётку: выйдите и активируйте
+            расширение по токену доступа, тогда UID подставится ваш настоящий.
+          </div>
+        ) : (
+          <div className="hint" style={{ marginTop: 7 }}>
+            Войдите в Binance тем же аккаунтом — или попросите администратора перепривязать учётку.
+          </div>
+        )}
+        <button className="btn block" style={{ marginTop: 9 }} disabled={checking} onClick={() => void check()}>
+          <IconRefresh size={14} /> {checking ? 'Проверяем…' : 'Проверить снова'}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="status-line ok">
+      <IconCheck size={14} />
+      <span style={{ flex: 1 }}>
+        Сессия Binance активна
+        {state.browserUid ? (
+          <>
+            {' '}
+            — UID <b className="mono">{state.browserUid}</b>
+          </>
+        ) : null}
+        {state.hasPageHeaders ? '' : '. Откройте страницу ордера, чтобы данные приходили полнее'}
+      </span>
+    </div>
+  );
+}
+
+// отвечает на вопрос «оно вообще работает и само ли ловит ордер»
+function TabStatus({ panelEnabled, onEnable }: { panelEnabled: boolean; onEnable: () => void }) {
+  const [status, setStatus] = useState<TabStatusData | null>(null);
+
+  useEffect(() => {
+    void sendMessage<TabStatusData>({ type: 'GET_TAB_STATUS' }).then((r) => {
+      if (r.ok) setStatus(r.data);
+    });
+  }, []);
+
+  if (!status) return null;
+
+  if (!status.isBinance) {
+    return (
+      <div className="status-line">
+        <IconInfo size={14} />
+        <span>
+          Открытая вкладка — не Binance. Проверить контрагента можно и отсюда: введите UID, ник или
+          номер карты.
+        </span>
+      </div>
+    );
+  }
+
+  if (!panelEnabled) {
+    return (
+      <div className="status-line warn">
+        <IconAlert size={14} />
+        <span style={{ flex: 1 }}>
+          Вы на Binance, но панель поверх страницы выключена.
+        </span>
+        <button className="btn small" onClick={onEnable}>
+          Включить
+        </button>
+      </div>
+    );
+  }
+
+  if (!status.orderId) {
+    return (
+      <div className="status-line">
+        <IconInfo size={14} />
+        <span>Панель включена. Откройте страницу ордера — досье появится само.</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`status-line ${status.counterpartyNick ? 'ok' : ''}`}>
+      <IconCheck size={14} />
+      <span>
+        Ордер <b className="mono">···{status.orderId.slice(-6)}</b> определён автоматически
+        {status.counterpartyNick ? (
+          <>
+            , контрагент <b>{status.counterpartyNick}</b>
+          </>
+        ) : (
+          ', контрагента уточняем'
+        )}
+        .
+      </span>
     </div>
   );
 }
@@ -86,30 +373,27 @@ export function App() {
 function AuthForm({
   settings,
   onSettings,
-  onError,
-  onSuccess,
+  onDone,
 }: {
   settings: Settings | null;
   onSettings: (patch: Partial<Settings>) => Promise<void>;
-  onError: (message: string) => void;
-  onSuccess: () => Promise<void>;
+  onDone: () => Promise<void>;
 }) {
-  const [mode, setMode] = useState<'login' | 'activate'>('activate');
+  const [mode, setMode] = useState<'activate' | 'login'>('activate');
   const [token, setToken] = useState('');
   const [password, setPassword] = useState('');
   const [nickname, setNickname] = useState('');
   const [uid, setUid] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [apiUrl, setApiUrl] = useState(settings?.apiBaseUrl ?? '');
   const [showApi, setShowApi] = useState(false);
 
   const submit = async () => {
     setBusy(true);
-    onError('');
+    setError(null);
 
-    if (apiUrl && apiUrl !== settings?.apiBaseUrl) {
-      await onSettings({ apiBaseUrl: apiUrl.trim() });
-    }
+    if (apiUrl && apiUrl !== settings?.apiBaseUrl) await onSettings({ apiBaseUrl: apiUrl.trim() });
 
     const response =
       mode === 'activate'
@@ -118,6 +402,7 @@ function AuthForm({
             token: token.trim(),
             password,
             nickname: nickname.trim() || undefined,
+            binanceUid: uid.trim() || undefined,
           })
         : await sendMessage<Session>({
             type: 'AUTH_LOGIN',
@@ -127,80 +412,76 @@ function AuthForm({
 
     setBusy(false);
     if (!response.ok) {
-      onError(response.error.message);
+      setError(response.error.message);
       return;
     }
-    await onSuccess();
+    await onDone();
   };
 
   return (
     <>
-      <div className="tabs">
-        <div
-          className={`tab ${mode === 'activate' ? 'active' : ''}`}
-          onClick={() => setMode('activate')}
-        >
+      {error ? (
+        <div className="alert bad" onClick={() => setError(null)}>
+          <IconAlert size={15} />
+          <span>{error}</span>
+        </div>
+      ) : null}
+
+      <div className="seg">
+        <button className={mode === 'activate' ? 'active' : ''} onClick={() => setMode('activate')}>
           Активация
-        </div>
-        <div className={`tab ${mode === 'login' ? 'active' : ''}`} onClick={() => setMode('login')}>
+        </button>
+        <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
           Вход
-        </div>
+        </button>
       </div>
 
       <div className="card">
         {mode === 'activate' ? (
           <>
-            <div className="card-title">Токен доступа от администратора</div>
-            <input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Вставьте токен"
-              autoFocus
-            />
+            <label>Токен доступа от администратора</label>
+            <input value={token} autoFocus placeholder="Вставьте токен" onChange={(e) => setToken(e.target.value)} />
             <label>Ник (необязательно)</label>
             <input value={nickname} onChange={(e) => setNickname(e.target.value)} />
             <label>Придумайте пароль</label>
             <input
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
               placeholder="минимум 8 символов"
+              onChange={(e) => setPassword(e.target.value)}
             />
-            <div className="hint" style={{ marginTop: 8 }}>
-              UID Binance подставится автоматически — сначала войдите на binance.com в этом браузере.
+            <label>UID Binance (пусто — определить автоматически)</label>
+            <input value={uid} placeholder="например 123456789" onChange={(e) => setUid(e.target.value)} />
+            <div className="hint" style={{ marginTop: 9 }}>
+              Если вы вошли на binance.com в этом браузере, UID подставится сам. Иначе впишите его
+              вручную: он виден в профиле Binance.
             </div>
           </>
         ) : (
           <>
-            <div className="card-title">Вход</div>
-            <label>UID Binance (оставьте пустым для автоопределения)</label>
-            <input value={uid} onChange={(e) => setUid(e.target.value)} placeholder="напр. 123456789" />
+            <label>UID Binance (пусто — определить автоматически)</label>
+            <input value={uid} placeholder="например 123456789" onChange={(e) => setUid(e.target.value)} />
             <label>Пароль</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </>
         )}
 
-        <div className="row" style={{ marginTop: 12 }}>
-          <button
-            className="primary"
-            disabled={busy || password.length < 8 || (mode === 'activate' && token.length < 10)}
-            onClick={() => void submit()}
-          >
-            {busy ? 'Подождите…' : mode === 'activate' ? 'Активировать' : 'Войти'}
-          </button>
-        </div>
+        <button
+          className="btn primary block"
+          style={{ marginTop: 12 }}
+          disabled={busy || password.length < 8 || (mode === 'activate' && token.trim().length < 10)}
+          onClick={() => void submit()}
+        >
+          {busy ? 'Подождите…' : mode === 'activate' ? 'Активировать' : 'Войти'}
+        </button>
       </div>
 
-      <button className="ghost" onClick={() => setShowApi((v) => !v)}>
-        {showApi ? 'Скрыть настройки сервера' : 'Настройки сервера'}
+      <button className="btn ghost small" onClick={() => setShowApi((v) => !v)}>
+        {showApi ? 'Скрыть адрес сервера' : 'Адрес сервера'}
       </button>
       {showApi ? (
         <div className="card">
-          <div className="card-title">Адрес API</div>
+          <label>Адрес API</label>
           <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
           <div className="hint" style={{ marginTop: 6 }}>
             Локально: http://localhost:4000/v1
@@ -211,114 +492,7 @@ function AuthForm({
   );
 }
 
-// ───────────────────────────── Аккаунт ─────────────────────────────
-
-function Account({
-  session,
-  settings,
-  onSettings,
-  onLogout,
-  onNotice,
-  onError,
-}: {
-  session: Session;
-  settings: Settings | null;
-  onSettings: (patch: Partial<Settings>) => Promise<void>;
-  onLogout: () => Promise<void>;
-  onNotice: (message: string) => void;
-  onError: (message: string) => void;
-}) {
-  const [syncing, setSyncing] = useState(false);
-
-  const sync = async () => {
-    setSyncing(true);
-    const response = await sendMessage<{ created: number; updated: number } | null>({
-      type: 'SYNC_ORDERS',
-    });
-    setSyncing(false);
-
-    if (!response.ok) {
-      onError(response.error.message);
-      return;
-    }
-    if (!response.data) {
-      onNotice('Синхронизация недоступна: проверьте вход на Binance');
-      return;
-    }
-    onNotice(`Синхронизировано: +${response.data.created}, обновлено ${response.data.updated}`);
-  };
-
-  return (
-    <>
-      <div className="card">
-        <div className="card-title">Аккаунт</div>
-        <div className="kv">
-          <span>UID Binance</span>
-          <b>{session.user.binanceUid}</b>
-        </div>
-        <div className="kv">
-          <span>Роль</span>
-          <span className="badge">{session.user.role}</span>
-        </div>
-        <div className="kv">
-          <span>Команда</span>
-          <span>{session.user.teamId ? 'подключена' : 'нет'}</span>
-        </div>
-        <div className="kv">
-          <span>Подписка</span>
-          <span className="badge ok">
-            {session.user.subscription.plan === 'FREE' ? 'бесплатно' : session.user.subscription.plan}
-          </span>
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title">Настройки</div>
-        <div className="switch">
-          <span>Показывать панель на ордере</span>
-          <input
-            type="checkbox"
-            checked={settings?.panelEnabled ?? true}
-            onChange={(e) => void onSettings({ panelEnabled: e.target.checked })}
-          />
-        </div>
-        <div className="switch">
-          <span>Синхронизировать мои ордера</span>
-          <input
-            type="checkbox"
-            checked={settings?.autoSyncOrders ?? true}
-            onChange={(e) => void onSettings({ autoSyncOrders: e.target.checked })}
-          />
-        </div>
-        <div className="switch">
-          <span>Собирать реквизиты из чата</span>
-          <input
-            type="checkbox"
-            checked={settings?.captureChatRequisites ?? true}
-            onChange={(e) => void onSettings({ captureChatRequisites: e.target.checked })}
-          />
-        </div>
-      </div>
-
-      <SearchCard onError={onError} />
-
-      <div className="row">
-        <button disabled={syncing} onClick={() => void sync()}>
-          {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
-        </button>
-        <button className="ghost" onClick={() => void onLogout()}>
-          Выйти
-        </button>
-      </div>
-
-      <div className="hint">
-        Панель появляется автоматически на странице ордера Binance P2P.
-      </div>
-    </>
-  );
-}
-
-// ───────────────────────────── Поиск по базе ─────────────────────────────
+// ───────────────────────────── Проверка контрагента ─────────────────────────────
 
 type SearchItem = {
   id: string;
@@ -330,17 +504,56 @@ type SearchItem = {
   blacklisted: boolean;
 };
 
-/** Проверка контрагента до сделки: по UID, нику или реквизиту. */
-function SearchCard({ onError }: { onError: (message: string) => void }) {
-  const [query, setQuery] = useState('');
+// проверка до сделки: по UID, нику или номеру карты
+function CheckTab({
+  session,
+  onError,
+  initialQuery,
+  initialDossier,
+}: {
+  session: Session;
+  onError: (m: string) => void;
+  initialQuery: string;
+  initialDossier: Dossier | null;
+}) {
+  const [query, setQuery] = useState(initialQuery);
   const [items, setItems] = useState<SearchItem[] | null>(null);
+  const [dossier, setDossierState] = useState<Dossier | null>(initialDossier);
   const [busy, setBusy] = useState(false);
+
+  // любая смена карточки сразу уходит в кэш попапа
+  const setDossier = useCallback((next: Dossier | null) => {
+    setDossierState(next);
+    savePopupState({ dossier: next });
+  }, []);
+
+  // восстановленное досье могло устареть, обновляем фоном
+  useEffect(() => {
+    if (!initialDossier) return;
+    void sendMessage<Dossier>({
+      type: 'GET_DOSSIER',
+      counterpartyId: initialDossier.counterparty.id,
+    }).then((r) => {
+      if (r.ok) setDossier(r.data);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const search = async () => {
     const value = query.trim();
     if (value.length < 2) return;
 
+    savePopupState({ query: value });
     setBusy(true);
+    setDossier(null);
+
+    // чистый UID ведёт прямо в досье, без лишнего круга через поиск
+    if (/^\d{5,}$/.test(value)) {
+      setItems(null);
+      await lookupByUid(value);
+      return;
+    }
+
     const response = await sendMessage<{ items: SearchItem[] }>({
       type: 'SEARCH_COUNTERPARTIES',
       query: value,
@@ -354,49 +567,704 @@ function SearchCard({ onError }: { onError: (message: string) => void }) {
     setItems(response.data.items);
   };
 
+  const lookupByUid = async (uid: string) => {
+    setBusy(true);
+    const response = await sendMessage<Dossier>({ type: 'LOOKUP_COUNTERPARTY', uid });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setDossier(response.data);
+  };
+
+  const open = async (id: string) => {
+    setBusy(true);
+    const response = await sendMessage<Dossier>({ type: 'GET_DOSSIER', counterpartyId: id });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setDossier(response.data);
+  };
+
+  const refresh = async () => {
+    if (dossier) await open(dossier.counterparty.id);
+  };
+
+  const actions: DossierActions = {
+    busy,
+    isAdmin: session.user.role === 'ADMIN',
+    hasTeam: Boolean(session.user.teamId),
+    onReview: (rating: ReviewRating, tag: ReviewTag, text: string) => {
+      if (!dossier) return;
+      void sendMessage({
+        type: 'SUBMIT_REVIEW',
+        counterpartyId: dossier.counterparty.id,
+        rating,
+        tag,
+        text,
+      }).then(refresh);
+    },
+    onDeleteReview: (reviewId) => void sendMessage({ type: 'DELETE_REVIEW', reviewId }).then(refresh),
+    onTeamNote: (text) => {
+      if (!dossier) return;
+      void sendMessage({ type: 'SAVE_TEAM_NOTE', counterpartyId: dossier.counterparty.id, text }).then(refresh);
+    },
+    onBlacklist: (reason, severity, scope) => {
+      if (!dossier) return;
+      void sendMessage({
+        type: 'ADD_BLACKLIST',
+        counterpartyId: dossier.counterparty.id,
+        reason,
+        severity,
+        scope,
+      }).then(refresh);
+    },
+    onRevokeBlacklist: (entryId) => void sendMessage({ type: 'REVOKE_BLACKLIST', entryId }).then(refresh),
+  };
+
+  if (dossier) {
+    return (
+      <>
+        <div className="actions">
+          <button className="btn ghost small" onClick={() => setDossier(null)}>
+            <IconArrowLeft size={14} /> К поиску
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn ghost small" disabled={busy} onClick={() => void refresh()}>
+            <IconRefresh size={14} />
+          </button>
+        </div>
+        <DossierView dossier={dossier} actions={actions} />
+      </>
+    );
+  }
+
   return (
-    <div className="card">
-      <div className="card-title">Проверить контрагента</div>
-      <div className="row">
-        <input
-          placeholder="UID, ник или номер карты"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && void search()}
-        />
-        <button style={{ flex: '0 0 auto' }} disabled={busy || query.trim().length < 2} onClick={() => void search()}>
-          {busy ? '…' : 'Найти'}
-        </button>
+    <>
+      <div className="card">
+        <div className="card-title">Проверить контрагента</div>
+        <div className="row">
+          <input
+            autoFocus
+            placeholder="UID, ник или номер карты"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && void search()}
+          />
+          <button className="btn primary fixed" disabled={busy || query.trim().length < 2} onClick={() => void search()}>
+            {busy ? '…' : 'Найти'}
+          </button>
+        </div>
       </div>
 
       {items?.length ? (
-        <div style={{ marginTop: 10 }}>
-          {items.slice(0, 8).map((item) => (
-            <div key={item.id} className="kv" style={{ alignItems: 'flex-start' }}>
-              <span>
-                <b style={{ color: '#e8ecf3' }}>{item.nickname ?? 'без ника'}</b>
-                <div style={{ fontSize: 11 }}>UID {item.externalId}</div>
-              </span>
-              <span style={{ textAlign: 'right' }}>
-                {item.blacklisted ? (
-                  <span className="badge" style={{ color: '#ff8080', borderColor: 'rgba(240,68,68,.4)' }}>
-                    в ЧС
-                  </span>
-                ) : (
-                  <span className="badge ok">чисто</span>
-                )}
-                <div style={{ fontSize: 11 }}>
-                  отзывов: {item.reviews} · сделок: {item.orders}
+        <div className="card">
+          <div className="card-title">
+            Найдено <span className="count">{items.length}</span>
+          </div>
+          {items.map((item) => (
+            <button key={item.id} className="result" onClick={() => void open(item.id)}>
+              <div className="avatar">
+                <span className="initial">{initialOf(item.nickname, item.externalId)}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="n">{item.nickname ?? 'без ника'}</div>
+                <div className="s mono">
+                  UID {item.externalId}
+                  {item.countryCode ? ` · ${item.countryCode}` : ''}
                 </div>
-              </span>
-            </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span className={`badge ${item.blacklisted ? 'bad' : 'ok'}`}>
+                  {item.blacklisted ? 'в ЧС' : 'чисто'}
+                </span>
+                <div className="s">
+                  отзывов {item.reviews} · сделок {item.orders}
+                </div>
+              </div>
+            </button>
           ))}
         </div>
       ) : items ? (
-        <div className="hint" style={{ marginTop: 8 }}>
-          В базе никого не нашлось — контрагент нам ещё не встречался.
+        <div className="card">
+          <div className="muted">
+            В базе никого не нашлось — этот контрагент нам ещё не встречался.
+          </div>
         </div>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+// ───────────────────────────── Команда ─────────────────────────────
+
+type TeamResponse = {
+  team: { id: string; name: string; slug: string; ownerId: string };
+  isLead: boolean;
+  members: {
+    id: string;
+    binanceUid: string;
+    nickname: string | null;
+    role: string;
+    status: string;
+    isOwner: boolean;
+    lastSeenAt: string | null;
+    stats: { total: number; completed: number; cancelled: number; volumeFiat: number };
+  }[];
+};
+
+function TeamTab({
+  session,
+  onError,
+  onNotice,
+  onReload,
+}: {
+  session: Session;
+  onError: (m: string) => void;
+  onNotice: (m: string) => void;
+  onReload: () => Promise<void>;
+}) {
+  const [team, setTeam] = useState<TeamResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [token, setToken] = useState('');
+  const [teamName, setTeamName] = useState('');
+  const [mode, setMode] = useState<'join' | 'create'>('join');
+  const [busy, setBusy] = useState(false);
+  const [invite, setInvite] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!session.user.teamId) {
+      setTeam(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const response = await sendMessage<TeamResponse>({ type: 'GET_TEAM' });
+    setLoading(false);
+    if (response.ok) setTeam(response.data);
+    else onError(response.error.message);
+  }, [session.user.teamId, onError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const join = async () => {
+    setBusy(true);
+    const response = await sendMessage({ type: 'JOIN_TEAM', token: token.trim() });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setToken('');
+    onNotice('Вы в команде');
+    await onReload();
+    await load();
+  };
+
+  const leave = async () => {
+    setBusy(true);
+    const response = await sendMessage({ type: 'LEAVE_TEAM' });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    onNotice('Вы вышли из команды');
+    await onReload();
+    await load();
+  };
+
+  const createInvite = async () => {
+    setBusy(true);
+    const response = await sendMessage<{ token: string }>({
+      type: 'CREATE_TEAM_INVITE',
+      maxUses: 1,
+      expiresInDays: 14,
+    });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setInvite(response.data.token);
+  };
+
+  const createTeam = async () => {
+    setBusy(true);
+    const response = await sendMessage({ type: 'CREATE_TEAM', name: teamName.trim() });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setTeamName('');
+    onNotice('Команда создана, вы её тимлид');
+    await onReload();
+    await load();
+  };
+
+  if (!session.user.teamId) {
+    return (
+      <>
+        <div className="muted">
+          Команда даёт общий чёрный список, заметки по контрагентам и общую статистику сделок.
+          Состоять можно только в одной.
+        </div>
+
+        <div className="seg">
+          <button className={mode === 'join' ? 'active' : ''} onClick={() => setMode('join')}>
+            Вступить
+          </button>
+          <button className={mode === 'create' ? 'active' : ''} onClick={() => setMode('create')}>
+            Создать свою
+          </button>
+        </div>
+
+        {mode === 'join' ? (
+          <>
+            <div className="card">
+              <div className="card-title">
+                <IconUsers size={13} /> Вступить в команду
+              </div>
+              <label>Токен приглашения от тимлида</label>
+              <input value={token} placeholder="Вставьте токен" onChange={(e) => setToken(e.target.value)} />
+              <button
+                className="btn primary block"
+                style={{ marginTop: 10 }}
+                disabled={busy || token.trim().length < 10}
+                onClick={() => void join()}
+              >
+                {busy ? 'Проверяем…' : 'Вступить'}
+              </button>
+            </div>
+            <div className="hint">
+              Токен выдаёт тимлид у себя во вкладке «Команда» или администратор в админ-панели.
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="card">
+              <div className="card-title">
+                <IconPlus size={13} /> Создать команду
+              </div>
+              <label>Название</label>
+              <input
+                value={teamName}
+                placeholder="например «Альфа»"
+                onChange={(e) => setTeamName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && teamName.trim().length >= 2 && void createTeam()}
+              />
+              <button
+                className="btn primary block"
+                style={{ marginTop: 10 }}
+                disabled={busy || teamName.trim().length < 2}
+                onClick={() => void createTeam()}
+              >
+                {busy ? 'Создаём…' : 'Создать'}
+              </button>
+            </div>
+            <div className="hint">
+              Вы станете тимлидом: сможете выдавать токены на вступление, вести общий чёрный список
+              и заметки, видеть статистику всех участников.
+            </div>
+          </>
+        )}
+      </>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="center">
+        <div className="spinner" />
+        <div className="muted">Загружаем команду…</div>
+      </div>
+    );
+  }
+
+  if (!team) return <div className="muted">Не удалось загрузить команду</div>;
+
+  return (
+    <>
+      <div className="card">
+        <div className="card-title">
+          <IconUsers size={13} /> {team.team.name}
+          <span style={{ flex: 1 }} />
+          <span className="badge">{team.members.length} чел.</span>
+        </div>
+
+        {team.members.map((m) => (
+          <div className="member" key={m.id}>
+            <div className="avatar" style={{ width: 28, height: 28 }}>
+              <span className="initial">{initialOf(m.nickname, m.binanceUid)}</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="n">
+                {m.nickname ?? 'без ника'}
+                {m.isOwner ? <span className="badge accent" style={{ marginLeft: 6 }}>тимлид</span> : null}
+                {m.id === session.user.id ? <span className="badge" style={{ marginLeft: 6 }}>вы</span> : null}
+              </div>
+              <div className="s mono">UID {m.binanceUid}</div>
+            </div>
+            <div className="stat">
+              <b>{fmtMoney(m.stats.volumeFiat)}</b>
+              {fmtNumber(m.stats.completed)} / {fmtNumber(m.stats.cancelled)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {team.isLead ? (
+        <div className="card">
+          <div className="card-title">Пригласить в команду</div>
+          {invite ? (
+            <>
+              <div className="token-reveal">{invite}</div>
+              <div className="actions" style={{ marginTop: 8 }}>
+                <button
+                  className="btn small"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(invite);
+                  }}
+                >
+                  <IconCopy size={13} /> Скопировать
+                </button>
+                <button className="btn ghost small" onClick={() => setInvite(null)}>
+                  Скрыть
+                </button>
+              </div>
+              <div className="hint" style={{ marginTop: 7 }}>
+                В базе хранится только хэш — показать значение повторно нельзя.
+              </div>
+            </>
+          ) : (
+            <button className="btn block" disabled={busy} onClick={() => void createInvite()}>
+              <IconPlus size={14} /> Создать токен (1 использование, 14 дней)
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {team.team.ownerId !== session.user.id ? (
+        <button className="btn danger block" disabled={busy} onClick={() => void leave()}>
+          Выйти из команды
+        </button>
+      ) : (
+        <div className="hint">
+          Вы владелец команды. Чтобы выйти, сначала назначьте другого тимлида в админ-панели.
+        </div>
+      )}
+    </>
+  );
+}
+
+// ───────────────────────────── Шаблоны ─────────────────────────────
+
+function TemplatesTab({ onError, onNotice }: { onError: (m: string) => void; onNotice: (m: string) => void }) {
+  const [items, setItems] = useState<MessageTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState<MessageTemplate | 'new' | null>(null);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [shared, setShared] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const response = await sendMessage<{ items: MessageTemplate[] }>({ type: 'GET_TEMPLATES' });
+    setLoading(false);
+    if (response.ok) setItems(response.data.items);
+    else onError(response.error.message);
+  }, [onError]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const startEdit = (tpl: MessageTemplate | 'new') => {
+    setEditing(tpl);
+    setTitle(tpl === 'new' ? '' : tpl.title);
+    setBody(tpl === 'new' ? '' : tpl.body);
+    setShared(tpl === 'new' ? false : tpl.shared);
+  };
+
+  const save = async () => {
+    setBusy(true);
+    const response = await sendMessage({
+      type: 'SAVE_TEMPLATE',
+      id: editing && editing !== 'new' ? editing.id : undefined,
+      title: title.trim(),
+      body: body.trim(),
+      shared,
+    });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    setEditing(null);
+    onNotice('Шаблон сохранён');
+    await load();
+  };
+
+  const remove = async (id: string) => {
+    setBusy(true);
+    const response = await sendMessage({ type: 'DELETE_TEMPLATE', id });
+    setBusy(false);
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    await load();
+  };
+
+  if (editing) {
+    return (
+      <div className="card">
+        <div className="card-title">{editing === 'new' ? 'Новый шаблон' : 'Изменить шаблон'}</div>
+        <label>Название</label>
+        <input value={title} autoFocus placeholder="Реквизиты" onChange={(e) => setTitle(e.target.value)} />
+        <label>Текст</label>
+        <textarea
+          rows={4}
+          value={body}
+          placeholder="Отправьте, пожалуйста, реквизиты для перевода."
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <div className="switch" style={{ marginTop: 9 }}>
+          <div>
+            <div className="k">Шаблон команды</div>
+            <div className="d">виден всем участникам, создаёт тимлид</div>
+          </div>
+          <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} />
+        </div>
+        <div className="actions" style={{ marginTop: 10 }}>
+          <button
+            className="btn primary"
+            disabled={busy || title.trim().length < 1 || body.trim().length < 1}
+            onClick={() => void save()}
+          >
+            Сохранить
+          </button>
+          <button className="btn ghost" onClick={() => setEditing(null)}>
+            Отмена
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="card">
+        <div className="card-title">
+          Быстрые ответы <span className="count">{items.length}</span>
+          <span style={{ flex: 1 }} />
+          <button className="icon-btn" title="Добавить" onClick={() => startEdit('new')}>
+            <IconPlus size={15} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="muted">Загружаем…</div>
+        ) : items.length ? (
+          items.map((t) => (
+            <div className="tpl" key={t.id}>
+              <div className="tpl-head">
+                <span className="tpl-title">{t.title}</span>
+                {t.shared ? <span className="badge">команда</span> : null}
+                <button
+                  className="icon-btn"
+                  title="Скопировать"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(t.body);
+                    onNotice('Текст скопирован');
+                  }}
+                >
+                  <IconCopy size={14} />
+                </button>
+                {t.canEdit ? (
+                  <>
+                    <button className="icon-btn" title="Изменить" onClick={() => startEdit(t)}>
+                      <IconNote size={14} />
+                    </button>
+                    <button className="icon-btn" title="Удалить" disabled={busy} onClick={() => void remove(t.id)}>
+                      <IconTrash size={14} />
+                    </button>
+                  </>
+                ) : null}
+              </div>
+              <div className="tpl-body">{t.body}</div>
+            </div>
+          ))
+        ) : (
+          <div className="muted">Шаблонов пока нет. Добавьте первый — он появится в панели ордера.</div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ───────────────────────────── Настройки ─────────────────────────────
+
+function SettingsTab({
+  session,
+  settings,
+  onSettings,
+  onError,
+  onNotice,
+  onLogout,
+}: {
+  session: Session;
+  settings: Settings | null;
+  onSettings: (patch: Partial<Settings>) => Promise<void>;
+  onError: (m: string) => void;
+  onNotice: (m: string) => void;
+  onLogout: () => Promise<void>;
+}) {
+  const [syncing, setSyncing] = useState(false);
+  const [apiUrl, setApiUrl] = useState(settings?.apiBaseUrl ?? '');
+
+  const sync = async () => {
+    setSyncing(true);
+    const response = await sendMessage<{ created: number; updated: number } | null>({ type: 'SYNC_ORDERS' });
+    setSyncing(false);
+
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    if (!response.data) {
+      onNotice('Синхронизация недоступна: проверьте, что вы вошли на binance.com');
+      return;
+    }
+    onNotice(`Синхронизировано: новых ${response.data.created}, обновлено ${response.data.updated}`);
+  };
+
+  return (
+    <>
+      <div className="card">
+        <div className="card-title">
+          <IconUser size={13} /> Аккаунт
+        </div>
+        <div className="kv">
+          <span>UID Binance</span>
+          <b className="mono">{session.user.binanceUid}</b>
+        </div>
+        <div className="kv">
+          <span>Ник</span>
+          <b>{session.user.nickname ?? '—'}</b>
+        </div>
+        <div className="kv">
+          <span>Роль</span>
+          <span className="badge accent">
+            {session.user.role === 'ADMIN' ? 'админ' : session.user.role === 'TEAM_LEAD' ? 'тимлид' : 'юзер'}
+          </span>
+        </div>
+        <div className="kv">
+          <span>Команда</span>
+          <span className={`badge ${session.user.teamId ? 'ok' : ''}`}>
+            {session.user.teamId ? 'подключена' : 'нет'}
+          </span>
+        </div>
+        <div className="kv">
+          <span>Подписка</span>
+          <span className="badge ok">
+            {session.user.subscription.plan === 'FREE' ? 'бесплатно' : session.user.subscription.plan}
+          </span>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Тема</div>
+        <div className="seg">
+          {(['light', 'dark', 'auto'] as const).map((t) => (
+            <button
+              key={t}
+              className={settings?.theme === t ? 'active' : ''}
+              onClick={() => void onSettings({ theme: t })}
+            >
+              {t === 'light' ? 'Светлая' : t === 'dark' ? 'Тёмная' : 'Как в системе'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Поведение</div>
+        <div className="switch">
+          <div>
+            <div className="k">Панель на странице ордера</div>
+            <div className="d">
+              карточка контрагента поверх Binance. Пока выключено, расширение на страницу биржи не
+              выводит ничего — проверять можно отсюда, через «Проверку»
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings?.panelEnabled ?? false}
+            onChange={(e) => void onSettings({ panelEnabled: e.target.checked })}
+          />
+        </div>
+        <div className="switch">
+          <div>
+            <div className="k">Синхронизировать мои ордера</div>
+            <div className="d">пополняет общую статистику сделок</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings?.autoSyncOrders ?? true}
+            onChange={(e) => void onSettings({ autoSyncOrders: e.target.checked })}
+          />
+        </div>
+        <div className="switch">
+          <div>
+            <div className="k">Собирать реквизиты из чата</div>
+            <div className="d">ловит подмену карты в процессе сделки</div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings?.captureChatRequisites ?? true}
+            onChange={(e) => void onSettings({ captureChatRequisites: e.target.checked })}
+          />
+        </div>
+      </div>
+
+      <button className="btn block" disabled={syncing} onClick={() => void sync()}>
+        <IconRefresh size={14} /> {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
+      </button>
+
+      {/* Адрес сервера рядовому пользователю менять незачем: общая база отзывов
+          и ЧС живёт на одном адресе для всех. Прячем и объясняем, что это. */}
+      <details className="advanced">
+        <summary>Для администратора</summary>
+        <div className="card" style={{ marginTop: 8 }}>
+          <div className="card-title">Куда расширение отправляет данные</div>
+          <div className="hint" style={{ marginBottom: 8 }}>
+            Адрес сервера P2P Guard — там лежит общая база отзывов, чёрного списка и сделок.
+            Менять нужно, только если сервер развёрнут не по стандартному адресу. Сессия Binance
+            туда не отправляется никогда.
+          </div>
+          <input value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
+          <button
+            className="btn block"
+            style={{ marginTop: 8 }}
+            disabled={!apiUrl.trim() || apiUrl === settings?.apiBaseUrl}
+            onClick={() => void onSettings({ apiBaseUrl: apiUrl.trim() }).then(() => onNotice('Адрес сохранён'))}
+          >
+            Сохранить адрес
+          </button>
+        </div>
+      </details>
+
+      <button className="btn ghost block" onClick={() => void onLogout()}>
+        <IconLogout size={14} /> Выйти
+      </button>
+    </>
   );
 }

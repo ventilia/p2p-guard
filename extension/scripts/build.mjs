@@ -1,12 +1,5 @@
-/**
- * Сборка расширения на esbuild.
- *
- * Почему не Vite: content script в MV3 не может быть ES-модулем, ему нужен
- * один самодостаточный IIFE-бандл. esbuild даёт это без плагинов и без бет.
- *
- *   node scripts/build.mjs           — разовая сборка
- *   node scripts/build.mjs --watch   — пересборка на лету
- */
+// esbuild, а не Vite: content script в MV3 должен быть одним IIFE-бандлом
+// прод включается флагом --prod: NODE_ENV=... в npm-скрипте на Windows не работает
 import { build, context } from 'esbuild';
 import { cp, mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -15,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outdir = resolve(root, 'dist');
 const watch = process.argv.includes('--watch');
-const dev = watch || process.env.NODE_ENV !== 'production';
+const prod = process.argv.includes('--prod') || process.env.NODE_ENV === 'production';
+const dev = watch || !prod;
 
 /** @type {import('esbuild').BuildOptions} */
 const common = {
@@ -70,7 +64,7 @@ async function run() {
     console.log('   После правки manifest.json/иконок перезапустите сборку.\n');
   } else {
     await Promise.all(targets.map((t) => build({ ...common, ...t })));
-    console.log('\n✅ Собрано в extension/dist');
+    console.log(`\n✅ Собрано в extension/dist (${dev ? 'dev' : 'production'})`);
     console.log('   chrome://extensions → «Загрузить распакованное» → выбрать dist\n');
   }
 }

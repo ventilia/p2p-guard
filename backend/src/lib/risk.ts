@@ -1,40 +1,65 @@
-/**
- * Риск-скор контрагента.
- *
- * Модель намеренно простая и аддитивная: каждый фактор возвращается наружу
- * вместе с вкладом в баллах. Трейдер должен видеть, ПОЧЕМУ карточка красная,
- * иначе он перестанет доверять оценке и будет её игнорировать.
- */
+// аддитивная модель: каждый фактор отдаётся наружу со своим вкладом, чтобы
+// трейдер видел, из чего сложился балл, и не игнорировал оценку
 
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export type RiskFactor = {
   code: string;
   label: string;
-  /** Вклад в итоговый балл: положительный — хуже, отрицательный — лучше. */
+  // положительный вклад — хуже, отрицательный — лучше
   impact: number;
   detail?: string;
 };
+
+export type ReviewTag = 'SCAM' | 'FREEZE' | 'DIRTY' | 'TERMS' | 'PAINTER' | 'RUDE' | 'COMMENT';
 
 export type RiskInput = {
   globalBlacklist: number;
   teamBlacklist: number;
   blacklistedRequisites: number;
   reviews: { positive: number; neutral: number; negative: number };
-  /** Ордера всех пользователей нашей базы с этим контрагентом. */
+  reviewTags?: Partial<Record<ReviewTag, number>>;
+  // ордера всех пользователей нашей базы с этим контрагентом
   orders: { total: number; completed: number; cancelled: number };
-  /** Ордера только моей команды. */
   teamOrders: { total: number; completed: number };
-  /** Публичная статистика с биржи (может отсутствовать). */
+  // сумма открытого сейчас ордера, сравнивается со средним чеком
+  currentOrderFiat?: number | null;
+  // публичная статистика биржи, может отсутствовать целиком
   exchange: {
     registeredDays?: number | null;
-    /** Доля успешных сделок, 0..1 */
+    firstOrderDays?: number | null;
+    // доля успешных сделок, 0..1
     completionRate?: number | null;
     totalOrders?: number | null;
+    orders30d?: number | null;
     avgReleaseMinutes?: number | null;
     avgPayMinutes?: number | null;
     avgAmountFiat?: number | null;
+    avgAmount30dFiat?: number | null;
+    positiveCount?: number | null;
+    negativeCount?: number | null;
   };
+};
+
+// во сколько баллов обходится один отзыв такой категории
+const TAG_WEIGHT: Record<ReviewTag, number> = {
+  SCAM: 14,
+  DIRTY: 12,
+  PAINTER: 12,
+  FREEZE: 8,
+  TERMS: 5,
+  RUDE: 2,
+  COMMENT: 0,
+};
+
+const TAG_LABEL: Record<ReviewTag, string> = {
+  SCAM: 'мошенник',
+  DIRTY: 'грязь',
+  PAINTER: 'художник',
+  FREEZE: 'мороз',
+  TERMS: 'невыполнение условий',
+  RUDE: 'неадекват',
+  COMMENT: 'комментарий',
 };
 
 export type RiskResult = {
@@ -79,7 +104,7 @@ export function calculateRisk(input: RiskInput): RiskResult {
   const reviewsTotal = positive + neutral + negative;
 
   if (negative > 0) {
-    // Доля негатива важнее абсолютного числа, но одиночный негатив тоже весит.
+    // доля негатива важнее абсолютного числа, но одиночный негатив тоже весит
     const share = negative / Math.max(1, reviewsTotal);
     const impact = clamp(Math.round(share * 25 + Math.min(negative, 5) * 2), 5, 35);
     factors.push({
@@ -96,6 +121,22 @@ export function calculateRisk(input: RiskInput): RiskResult {
       label: 'Только положительные отзывы',
       impact: -20,
       detail: `${positive} шт.`,
+    });
+  }
+
+  // «пропал с деньгами» и «нахамил» нельзя смешивать в одном счётчике негатива
+  const tags = input.reviewTags ?? {};
+  const heavy = (Object.entries(tags) as [ReviewTag, number][])
+    .filter(([tag, count]) => count > 0 && TAG_WEIGHT[tag] >= 8)
+    .sort((a, b) => TAG_WEIGHT[b[0]] * b[1] - TAG_WEIGHT[a[0]] * a[1]);
+
+  if (heavy.length) {
+    const raw = heavy.reduce((sum, [tag, count]) => sum + TAG_WEIGHT[tag] * Math.min(count, 3), 0);
+    factors.push({
+      code: 'SEVERE_COMPLAINTS',
+      label: 'Тяжёлые жалобы от трейдеров',
+      impact: clamp(raw, 8, 40),
+      detail: heavy.map(([tag, count]) => `${TAG_LABEL[tag]} × ${count}`).join(', '),
     });
   }
 
@@ -132,8 +173,7 @@ export function calculateRisk(input: RiskInput): RiskResult {
   }
 
   if (typeof ex.completionRate === 'number' && ex.completionRate < 0.9) {
-    // У живых мерчантов Binance этот показатель 95–100%. Всё, что заметно ниже,
-    // означает либо массовые отмены, либо споры — признак сильный, вес высокий.
+    // у живых мерчантов 95–100%, заметно ниже — массовые отмены или споры
     factors.push({
       code: 'LOW_COMPLETION_RATE',
       label: 'Низкий процент завершённых сделок на бирже',
@@ -165,6 +205,74 @@ export function calculateRisk(input: RiskInput): RiskResult {
     });
   }
 
+  // аккаунт мог «отлежаться» после регистрации, поэтому важна первая сделка
+  if (typeof ex.firstOrderDays === 'number' && ex.firstOrderDays >= 0 && ex.firstOrderDays < 30) {
+    factors.push({
+      code: 'FIRST_ORDER_RECENT',
+      label: 'Первая сделка меньше месяца назад',
+      impact: 12,
+      detail: `${ex.firstOrderDays} дн. с 1-го ордера`,
+    });
+  }
+
+  const exPositive = ex.positiveCount ?? 0;
+  const exNegative = ex.negativeCount ?? 0;
+  const exTotal = exPositive + exNegative;
+  if (exTotal >= 5) {
+    const share = exPositive / exTotal;
+    if (share < 0.6) {
+      factors.push({
+        code: 'LOW_POSITIVE_SHARE',
+        label: 'Мало положительных отзывов на бирже',
+        impact: clamp(Math.round((0.6 - share) * 45) + 8, 8, 22),
+        detail: `${Math.round(share * 100)}% позитива из ${exTotal}`,
+      });
+    }
+  }
+
+  // во сколько раз одно больше другого, ноль и мусор расхождением не считаем
+  const ratio = (a: number, b: number) => (a > 0 && b > 0 ? Math.max(a, b) / Math.min(a, b) : 1);
+
+  // резкая смена среднего чека — признак «разгона» аккаунта перед скамом
+  if (typeof ex.avgAmountFiat === 'number' && typeof ex.avgAmount30dFiat === 'number') {
+    const k = ratio(ex.avgAmountFiat, ex.avgAmount30dFiat);
+    if (k > 2) {
+      factors.push({
+        code: 'TICKET_MISMATCH',
+        label: 'Средний чек за 30 дней резко отличается от общего',
+        impact: 12,
+        detail: `в ${k.toFixed(1)}× (${Math.round(ex.avgAmount30dFiat)} против ${Math.round(ex.avgAmountFiat)})`,
+      });
+    }
+  }
+
+  const avgTicket = ex.avgAmount30dFiat ?? ex.avgAmountFiat;
+  if (typeof input.currentOrderFiat === 'number' && typeof avgTicket === 'number') {
+    const k = ratio(input.currentOrderFiat, avgTicket);
+    if (k > 2) {
+      factors.push({
+        code: 'ORDER_VS_AVG_TICKET',
+        label: 'Сумма этой сделки не похожа на его обычную',
+        impact: 14,
+        detail: `в ${k.toFixed(1)}× от среднего чека (${Math.round(avgTicket)})`,
+      });
+    }
+  }
+
+  if (
+    typeof ex.totalOrders === 'number' &&
+    typeof ex.orders30d === 'number' &&
+    ex.totalOrders >= 10 &&
+    ex.orders30d / ex.totalOrders > 0.5
+  ) {
+    factors.push({
+      code: 'RECENT_ORDER_BURST',
+      label: 'Почти все сделки сделаны за последний месяц',
+      impact: 10,
+      detail: `${ex.orders30d} из ${ex.totalOrders}`,
+    });
+  }
+
   if (factors.length === 0) {
     factors.push({
       code: 'NO_DATA',
@@ -183,7 +291,7 @@ export function calculateRisk(input: RiskInput): RiskResult {
   const level: RiskLevel =
     score >= 70 ? 'CRITICAL' : score >= 40 ? 'HIGH' : score >= 15 ? 'MEDIUM' : 'LOW';
 
-  // Самые весомые факторы — первыми: UI показывает верхние 3-4.
+  // весомые первыми: UI показывает только верхние
   factors.sort((a, b) => Math.abs(b.impact) - Math.abs(a.impact));
 
   return { score, level, factors };
