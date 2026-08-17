@@ -229,11 +229,7 @@ export function Panel() {
         scope,
       }),
     onRevokeBlacklist: (entryId) => void run({ type: 'REVOKE_BLACKLIST', entryId }),
-    onUseTemplate: (text) => {
-      const send = settings.templateMode === 'send';
-      if (!insertIntoChat(text, send)) return null;
-      return send ? 'sent' : 'inserted';
-    },
+    onUseTemplate: (text) => insertIntoChat(text, settings.templateMode === 'send'),
   };
 
   return (

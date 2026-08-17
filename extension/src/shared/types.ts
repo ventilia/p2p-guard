@@ -69,10 +69,8 @@ export type ExchangeStats = {
   feedbackCount?: number | null;
   followers?: number | null;
   blockedBy?: number | null;
-  // страна подтверждения аккаунта, ISO: RU, KZ, AZE
+  // страна регистрации аккаунта по данным биржи, ISO: RU, KZ, AZE
   kycCountry?: string | null;
-  // как узнали страну: подтверждение биржи или код телефона
-  kycCountrySource?: 'exchange' | 'phone' | null;
   totalVolumeFiat?: number | null;
   volume30dFiat?: number | null;
 };

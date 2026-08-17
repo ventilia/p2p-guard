@@ -108,35 +108,69 @@ function submitChat(el: HTMLElement): void {
   }
 }
 
-export function insertIntoChat(text: string, send = false): boolean {
-  const el = findChatInput();
-  if (!el) return false;
+const readField = (el: HTMLElement): string =>
+  el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+    ? el.value
+    : (el.textContent ?? '');
 
+// пишем в поле, не разбираясь, что это: textarea или редактор
+function writeField(el: HTMLElement, value: string): void {
   el.focus();
 
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-    // при отправке черновик не приклеиваем: уйдёт чужой текст вместе с шаблоном
-    setNativeValue(el, send ? text : join(el.value, text));
+    setNativeValue(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.setSelectionRange(el.value.length, el.value.length);
-    // React обновляет состояние кнопки не синхронно, отправляем следующим тиком
-    if (send) setTimeout(() => submitChat(el), 60);
-    return true;
+    return;
   }
 
   // contenteditable: правим через execCommand, чтобы редактор увидел ввод
-  const current = el.textContent ?? '';
   const selection = window.getSelection();
   const range = document.createRange();
   range.selectNodeContents(el);
-  range.collapse(false);
   selection?.removeAllRanges();
   selection?.addRange(range);
 
-  const addition = current.trimEnd() ? ` ${text}` : text;
-  if (!document.execCommand('insertText', false, addition)) {
-    el.textContent = join(current, text);
+  if (!document.execCommand('insertText', false, value)) {
+    el.textContent = value;
   }
-  el.dispatchEvent(new InputEvent('input', { bubbles: true, data: addition }));
-  return true;
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, data: value }));
+}
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export type InsertResult = 'inserted' | 'sent' | 'not-sent' | null;
+
+/**
+ * Вставка шаблона в чат биржи.
+ *
+ * При send=true результат проверяется по факту: после отправки Binance очищает
+ * поле, поэтому непустое поле означает, что сообщение не ушло. Возвращать
+ * «отправлено» сразу нельзя — трейдер решит, что контрагент уже всё получил.
+ * Если отправить не вышло, в поле остаётся и прежний черновик, и шаблон, чтобы
+ * ничего не потерялось и можно было дослать вручную.
+ */
+export async function insertIntoChat(text: string, send = false): Promise<InsertResult> {
+  const el = findChatInput();
+  if (!el) return null;
+
+  const draft = readField(el);
+
+  if (!send) {
+    writeField(el, join(draft, text));
+    return 'inserted';
+  }
+
+  // при отправке черновик не приклеиваем: уйдёт чужой текст вместе с шаблоном
+  writeField(el, text);
+
+  // React обновляет состояние кнопки не синхронно, отправляем следующим тиком
+  await delay(60);
+  submitChat(el);
+  await delay(280);
+
+  if (readField(el).trim() === '') return 'sent';
+
+  writeField(el, join(draft, text));
+  return 'not-sent';
 }

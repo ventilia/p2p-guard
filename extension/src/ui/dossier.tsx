@@ -26,6 +26,7 @@ import {
   fmtPercent,
   initialOf,
 } from '../shared/format.js';
+import { phoneRegion } from '../shared/phone.js';
 import { REVIEW_TAG_LABEL, type Dossier, type ReviewRating, type ReviewTag } from '../shared/types.js';
 
 const RISK_LABEL: Record<string, string> = {
@@ -38,6 +39,16 @@ const RISK_LABEL: Record<string, string> = {
 // категории, которые считаем обвинением, а не мнением
 const HEAVY_TAGS: ReviewTag[] = ['SCAM', 'DIRTY', 'PAINTER', 'FREEZE'];
 
+// что стало с шаблоном; null — поле ввода на странице не нашлось
+export type TemplateResult = 'inserted' | 'sent' | 'not-sent' | null;
+
+const TEMPLATE_LABEL: Record<'inserted' | 'sent' | 'not-sent' | 'none', string> = {
+  inserted: 'вставлено',
+  sent: 'отправлено',
+  'not-sent': 'не ушло, отправьте вручную',
+  none: 'поле чата не найдено',
+};
+
 export type DossierActions = {
   busy: boolean;
   onReview: (rating: ReviewRating, tag: ReviewTag, text: string) => void;
@@ -49,7 +60,7 @@ export type DossierActions = {
   hasTeam: boolean;
   // вставка шаблона в чат биржи, есть только в панели ордера
   // null означает, что поле ввода на странице не нашлось
-  onUseTemplate?: (body: string) => 'inserted' | 'sent' | null;
+  onUseTemplate?: (body: string) => Promise<TemplateResult>;
 };
 
 // ───────────────────────────── Мелочи ─────────────────────────────
@@ -122,6 +133,7 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
   const team = blacklist.filter((b) => b.scope === 'TEAM').length;
   const scam = tagCounts.SCAM ?? 0;
   const freeze = tagCounts.FREEZE ?? 0;
+  const region = phoneRegion(counterparty.maskedPhone);
 
   // «мошенник» важнее «мороза»
   const ourStatus =
@@ -146,7 +158,18 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
             </span>
             {counterparty.countryCode ? <span className="badge">{counterparty.countryCode}</span> : null}
           </div>
-          {counterparty.maskedPhone ? <div className="uid">{counterparty.maskedPhone}</div> : null}
+          {counterparty.maskedPhone ? (
+            <div className="uid">
+              {counterparty.maskedPhone}
+              {/* регион номера — не страна аккаунта, поэтому подписан отдельно */}
+              {region ? (
+                <span className="muted" title="Регион телефонного номера, а не страна регистрации аккаунта">
+                  {' '}
+                  · регион номера: {region}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -355,9 +378,15 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
       </div>
 
       <div className="verify">
-        <span className={`badge ${s.kycCountry ? 'accent' : ''}`} title={COUNTRY_HINT[s.kycCountrySource ?? 'none']}>
-          Страна: {s.kycCountry ?? 'неизвестна'}
-          {s.kycCountrySource === 'phone' ? ' (по телефону)' : ''}
+        <span
+          className={`badge ${s.kycCountry ? 'accent' : ''}`}
+          title={
+            s.kycCountry
+              ? 'Страна регистрации аккаунта по данным Binance'
+              : 'Binance не отдала страну регистрации по этому контрагенту'
+          }
+        >
+          Регистрация: {s.kycCountry ?? 'неизвестна'}
         </span>
         {s.merchantLevel ? <span className="badge">{s.merchantLevel}</span> : null}
         {verifications.map(([label, ok]) => (
@@ -369,12 +398,6 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
     </div>
   );
 }
-
-const COUNTRY_HINT: Record<string, string> = {
-  exchange: 'Страна подтверждения аккаунта по данным Binance',
-  phone: 'Определена по международному коду телефона контрагента, а не подтверждена биржей',
-  none: 'Binance не отдала страну, а телефон не распознан',
-};
 
 // отзывы самой биржи, отдельным блоком
 export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
@@ -869,7 +892,7 @@ export function TemplatesCard({
   onUse,
 }: {
   templates: { id: string; title: string; body: string }[];
-  onUse?: (body: string) => 'inserted' | 'sent' | null;
+  onUse?: (body: string) => Promise<TemplateResult>;
 }) {
   const [done, setDone] = useState<{ id: string; label: string } | null>(null);
   if (!templates.length) return null;
@@ -877,11 +900,8 @@ export function TemplatesCard({
   const use = async (id: string, body: string) => {
     // в ордере пишем прямо в поле чата, вне его остаётся буфер обмена
     if (onUse) {
-      const result = onUse(body);
-      setDone({
-        id,
-        label: result === 'sent' ? 'отправлено' : result === 'inserted' ? 'вставлено' : 'поле чата не найдено',
-      });
+      setDone({ id, label: '…' });
+      setDone({ id, label: TEMPLATE_LABEL[(await onUse(body)) ?? 'none'] });
     } else {
       try {
         await navigator.clipboard.writeText(body);

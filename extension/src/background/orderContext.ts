@@ -2,7 +2,6 @@
 // source отдаём наружу, чтобы в панели было видно, откуда взялись данные
 import {
   BinanceApiError,
-  countryFromPhone,
   extractFromPayload,
   fetchOrderDetail,
   fetchUserDetail,
@@ -166,21 +165,9 @@ async function enrich(
   }
   if (reviews.length) result = { ...result, exchangeReviews: reviews };
 
-  // страну биржа отдаёт не всегда, но у ордера есть замаскированный телефон
-  // контрагента — международный префикс в нём остаётся
-  if (!result.stats?.kycCountry) {
-    const byPhone = countryFromPhone(result.maskedPhone);
-    if (byPhone) {
-      result = {
-        ...result,
-        stats: { ...result.stats, kycCountry: byPhone, kycCountrySource: 'phone' },
-      };
-    }
-  }
-
-  if (detail || reviews.length || result.stats?.kycCountry) {
-    capture.users.set(result.externalId, result);
-  }
+  // кэшируем только настоящие данные биржи: производное значение здесь
+  // выглядело бы как готовая статистика, и профиль перестал бы запрашиваться
+  if (detail || reviews.length) capture.users.set(result.externalId, result);
 
   return result;
 }

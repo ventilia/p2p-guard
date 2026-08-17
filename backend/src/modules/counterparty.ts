@@ -33,9 +33,8 @@ const statsSchema = z
     feedbackCount: z.number().int().nonnegative().nullish(),
     followers: z.number().int().nonnegative().nullish(),
     blockedBy: z.number().int().nonnegative().nullish(),
-    // страна подтверждения аккаунта и то, откуда мы её узнали
+    // страна регистрации аккаунта по данным биржи
     kycCountry: z.string().trim().toUpperCase().min(2).max(3).nullish(),
-    kycCountrySource: z.enum(['exchange', 'phone']).nullish(),
     totalVolumeFiat: z.number().nonnegative().nullish(),
     volume30dFiat: z.number().nonnegative().nullish(),
   })

@@ -507,43 +507,6 @@ const pick = (obj: Record<string, unknown>, keys: string[]): unknown => {
   return undefined;
 };
 
-/**
- * Страна по коду телефона.
- *
- * Биржа отдаёт номер контрагента замаскированным, но международный префикс в
- * нём остаётся — этого хватает, чтобы назвать страну, даже когда страна
- * подтверждения в ответе не пришла. Список — коридоры, где реально идёт P2P.
- * Длинные коды стоят раньше коротких: +996 не должен совпасть с +9.
- */
-const PHONE_COUNTRY: [string, string][] = [
-  ['998', 'UZB'],
-  ['996', 'KGZ'],
-  ['995', 'GEO'],
-  ['994', 'AZE'],
-  ['993', 'TKM'],
-  ['992', 'TJK'],
-  ['971', 'ARE'],
-  ['380', 'UKR'],
-  ['374', 'ARM'],
-  ['373', 'MDA'],
-  ['375', 'BLR'],
-  ['90', 'TUR'],
-  ['77', 'KAZ'],
-  ['76', 'KAZ'],
-  ['7', 'RUS'],
-];
-
-export function countryFromPhone(phone: string | undefined): string | null {
-  if (!phone) return null;
-  const digits = phone.replace(/\D+/g, '');
-  if (digits.length < 5) return null;
-
-  for (const [prefix, code] of PHONE_COUNTRY) {
-    if (digits.startsWith(prefix)) return code;
-  }
-  return null;
-}
-
 // коды приходят и двухбуквенными, и трёхбуквенными — не переводим, только чистим
 const toCountry = (value: unknown): string | null => {
   const text = toText(value)?.toUpperCase().replace(/[^A-Z]/g, '');
@@ -685,8 +648,9 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
 
   const registerTime = toNumber(pick(detail, ['registerTime', 'registerDate', 'createTime']));
 
-  // страна подтверждения: сперва то, что назвала биржа, иначе код телефона
-  const fromExchange = toCountry(
+  // страна регистрации аккаунта — только со слов биржи. По телефону её не
+  // угадываем: номер может быть чужой страны, а поле подписано как «регистрация»
+  const kycCountry = toCountry(
     pick(detail, [
       'kycCountryCode',
       'kycCountry',
@@ -697,9 +661,6 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
       'nationality',
     ]),
   );
-  const kycCountry =
-    fromExchange ??
-    countryFromPhone(toText(pick(detail, ['mobilePhone', 'maskedPhone', 'mobile', 'phone'])));
 
   const totalOrders = toNumber(
     pick(s, ['completedOrderNum', 'totalFinishCount', 'totalOrderCount', 'orderCount']),
@@ -746,7 +707,6 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
     followers: toNumber(pick(s, ['followerCount', 'followers'])) ?? null,
     blockedBy: toNumber(pick(s, ['blockedCount', 'blackListCount'])) ?? null,
     kycCountry,
-    kycCountrySource: kycCountry ? (fromExchange ? 'exchange' : 'phone') : null,
     totalVolumeFiat: totalAmount ?? null,
     volume30dFiat: amount30d ?? null,
   };

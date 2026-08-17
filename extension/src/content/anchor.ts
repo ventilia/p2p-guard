@@ -38,71 +38,175 @@ function findChatColumn(): HTMLElement | null {
   return best;
 }
 
+export type Viewport = { width: number; height: number };
+
 /**
- * Правки чата надо уметь откатить, а ещё помнить его исходные размеры: без
- * этого каждый пересчёт мерил уже подрезанный чат и ужимал его снова — за
- * несколько тиков переписка схлопывалась в полоску.
+ * Правки чата надо уметь откатить, а ещё помнить размеры ДО них: иначе каждый
+ * пересчёт мерил уже подрезанный чат и ужимал его снова — за несколько тиков
+ * переписка схлопывалась в полоску.
+ *
+ * Размеры окна храним рядом: после ресайза исходная высота столбца другая, и
+ * старый замер отправлял бы панель за пределы экрана.
  */
 let sized: {
   el: HTMLElement;
-  height: string;
-  minHeight: string;
-  width: string;
+  css: { width: string; height: string; minHeight: string };
   natural: { width: number; height: number };
+  view: Viewport;
 } | null = null;
 
 function restoreChat(): void {
   if (!sized) return;
-  sized.el.style.height = sized.height;
-  sized.el.style.minHeight = sized.minHeight;
-  sized.el.style.width = sized.width;
+  sized.el.style.width = sized.css.width;
+  sized.el.style.height = sized.css.height;
+  sized.el.style.minHeight = sized.css.minHeight;
   sized = null;
 }
 
-// размеры чата до наших правок
-function naturalOf(el: HTMLElement, rect: DOMRect): { width: number; height: number } {
-  return sized?.el === el ? sized.natural : { width: rect.width, height: rect.height };
+export function releaseChat(): void {
+  restoreChat();
 }
 
-function remember(el: HTMLElement, natural: { width: number; height: number }): void {
-  if (sized && sized.el !== el) restoreChat();
-  if (sized) return;
-  sized = {
-    el,
-    height: el.style.height,
-    minHeight: el.style.minHeight,
-    width: el.style.width,
-    natural,
-  };
-}
+const sameView = (a: Viewport, b: Viewport) => a.width === b.width && a.height === b.height;
 
+/**
+ * Задаёт чату размеры и возвращает его исходные габариты.
+ * Если что-то из размеров null — эта сторона остаётся такой, какой её сделала биржа.
+ */
 function applyChatSize(
   el: HTMLElement,
-  natural: { width: number; height: number },
+  view: Viewport,
   size: { width: number | null; height: number | null },
+  natural: { width: number; height: number },
 ): void {
   if (size.width === null && size.height === null) {
     restoreChat();
     return;
   }
-  remember(el, natural);
+
+  // measureNatural к этому моменту уже откатил чужие правки, если они были
+  if (!sized) {
+    sized = {
+      el,
+      css: { width: el.style.width, height: el.style.height, minHeight: el.style.minHeight },
+      natural,
+      view,
+    };
+  }
+
+  el.style.width = size.width === null ? sized.css.width : `${size.width}px`;
 
   if (size.height === null) {
-    el.style.height = sized!.height;
-    el.style.minHeight = sized!.minHeight;
+    el.style.height = sized.css.height;
+    el.style.minHeight = sized.css.minHeight;
   } else {
     el.style.height = `${size.height}px`;
     el.style.minHeight = `${size.height}px`;
   }
-
-  el.style.width = size.width === null ? sized!.width : `${size.width}px`;
 }
 
-export type Layout = { box: AnchorBox; anchored: boolean };
-export type Viewport = { width: number; height: number };
+/**
+ * Габариты столбца без наших правок.
+ * Если правки уже наложены и окно с тех пор не менялось — берём запомненные,
+ * иначе откатываем стили и меряем заново.
+ */
+function measureNatural(el: HTMLElement, view: Viewport): { width: number; height: number } {
+  if (sized && sized.el === el && sameView(sized.view, view)) return sized.natural;
+
+  // другой элемент или другое окно — прежний замер недействителен
+  restoreChat();
+  const rect = el.getBoundingClientRect();
+  return { width: rect.width, height: rect.height };
+}
+
+const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 // пользовательские размеры чата, 0 означает «оставить как у биржи»
 export type ChatSize = { width: number; height: number };
+
+export type Plan = {
+  // что задать столбцу чата; null — не трогать эту сторону
+  chat: { width: number | null; height: number | null };
+  // какого размера получится панель
+  panel: { width: number; height: number };
+};
+
+/**
+ * Геометрия без DOM: по исходным габаритам столбца решает, каким сделать чат и
+ * какого размера будет панель. Позицию здесь НЕ считаем — её берём с живого
+ * элемента уже после того, как размеры применены, иначе приходится угадывать,
+ * в какую сторону поедет край столбца, и панель разъезжается с чатом.
+ */
+export function planLayout(
+  placement: Exclude<PanelPlacement, 'floating'>,
+  natural: { width: number; height: number },
+  panel: { width: number; height: number },
+  chatSize: ChatSize,
+  view: Viewport,
+): Plan {
+  const maxWidth = Math.max(260, Math.round(view.width * 0.6));
+  const width = chatSize.width > 0 ? clamp(chatSize.width, 260, maxWidth) : null;
+
+  if (placement === 'chat-left') {
+    // чат не делим, но выше своей колонки он не нужен: столбец начинается не от
+    // нуля, поэтому мерить по высоте окна нельзя — вылезет за нижний край
+    const maxHeight = Math.max(MIN_CHAT_HEIGHT, natural.height);
+    return {
+      chat: {
+        width,
+        height: chatSize.height > 0 ? clamp(chatSize.height, MIN_CHAT_HEIGHT, maxHeight) : null,
+      },
+      panel: {
+        width: panel.width,
+        height: Math.min(panel.height, view.height - GAP * 2),
+      },
+    };
+  }
+
+  // chat-bottom: столбец делится между перепиской и панелью
+  const available = natural.height - GAP;
+  const maxChat = Math.max(MIN_CHAT_HEIGHT, available - MIN_PANEL_HEIGHT);
+
+  // заданная высота чата главнее: её тянут ползунком и ждут точного результата
+  const chatHeight =
+    chatSize.height > 0
+      ? clamp(chatSize.height, MIN_CHAT_HEIGHT, maxChat)
+      : clamp(available - panel.height, MIN_CHAT_HEIGHT, maxChat);
+
+  return {
+    chat: { width, height: chatHeight },
+    panel: { width: width ?? natural.width, height: available - chatHeight },
+  };
+}
+
+/**
+ * Позиция панели относительно ЖИВОГО прямоугольника чата.
+ * rect читается после применения размеров, поэтому гадать, куда уехал край
+ * столбца при смене ширины, не нужно.
+ */
+export function panelPosition(
+  placement: Exclude<PanelPlacement, 'floating'>,
+  rect: AnchorBox,
+  panel: { width: number; height: number },
+  view: Viewport,
+): AnchorBox {
+  if (placement === 'chat-left') {
+    const width = Math.max(240, Math.min(panel.width, rect.left - GAP * 2));
+    return {
+      top: rect.top,
+      left: Math.max(GAP, rect.left - width - GAP),
+      width,
+      height: Math.min(panel.height, view.height - rect.top - GAP),
+    };
+  }
+
+  return {
+    top: rect.top + rect.height + GAP,
+    left: rect.left,
+    width: rect.width,
+    height: panel.height,
+  };
+}
 
 // свободная позиция: правый верх, как было до привязки
 export function floatingBox(width: number, height: number, view: Viewport): AnchorBox {
@@ -114,66 +218,7 @@ export function floatingBox(width: number, height: number, view: Viewport): Anch
   };
 }
 
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
-/**
- * Геометрия без DOM: по прямоугольнику чата считает место для панели и новые
- * размеры чата. Вынесено отдельно, потому что это единственная часть привязки,
- * где легко ошибиться на пиксель, и её нужно уметь проверить тестом.
- *
- * chat.width/height здесь — ИСХОДНЫЕ размеры столбца, до наших правок.
- */
-export function placeBox(
-  placement: Exclude<PanelPlacement, 'floating'>,
-  chat: AnchorBox,
-  panel: { width: number; height: number },
-  chatSize: ChatSize,
-  view: Viewport,
-): { box: AnchorBox; chat: { width: number | null; height: number | null } } {
-  // ширину чата задаём одинаково для обоих режимов, если её попросили
-  const width =
-    chatSize.width > 0
-      ? clamp(chatSize.width, 260, Math.max(260, Math.round(view.width * 0.6)))
-      : chat.width;
-  const chatWidth = chatSize.width > 0 ? width : null;
-
-  if (placement === 'chat-left') {
-    // чат мог стать шире, левый край сдвигается вместе с ним
-    const left = chat.left - (width - chat.width);
-    const panelWidth = Math.min(panel.width, left - GAP * 2);
-    return {
-      box: {
-        top: chat.top,
-        left: Math.max(GAP, left - panelWidth - GAP),
-        width: Math.max(240, panelWidth),
-        height: Math.min(panel.height, view.height - chat.top - GAP),
-      },
-      chat: { width: chatWidth, height: chatSize.height > 0 ? chatSize.height : null },
-    };
-  }
-
-  // chat-bottom: колонка делится между чатом и панелью
-  const available = chat.height - GAP;
-  const maxChat = available - MIN_PANEL_HEIGHT;
-
-  // заданная высота чата главнее: её тянут ползунком и ждут точного результата
-  const chatHeight =
-    chatSize.height > 0
-      ? clamp(chatSize.height, MIN_CHAT_HEIGHT, Math.max(MIN_CHAT_HEIGHT, maxChat))
-      : available - Math.min(panel.height, Math.max(MIN_PANEL_HEIGHT, available - MIN_CHAT_HEIGHT));
-
-  const panelHeight = available - chatHeight;
-
-  return {
-    box: {
-      top: chat.top + chatHeight + GAP,
-      left: chat.left + (chat.width - width),
-      width,
-      height: panelHeight,
-    },
-    chat: { width: chatWidth, height: chatHeight },
-  };
-}
+export type Layout = { box: AnchorBox; anchored: boolean };
 
 /**
  * Считает место под панель и, если надо, меняет размеры чата.
@@ -192,25 +237,22 @@ export function computeLayout(
     return { box: floatingBox(panel.width, panel.height, view), anchored: false };
   }
 
-  const rect = chat.getBoundingClientRect();
-  // считаем всегда от исходных размеров, иначе расчёт съедает сам себя
-  const natural = naturalOf(chat, rect);
+  const kind = placement as Exclude<PanelPlacement, 'floating'>;
+  const natural = measureNatural(chat, view);
+  const plan = planLayout(kind, natural, panel, chatSize, view);
 
-  const placed = placeBox(
-    placement as Exclude<PanelPlacement, 'floating'>,
-    { top: rect.top, left: rect.left, width: natural.width, height: natural.height },
-    panel,
-    chatSize,
+  applyChatSize(chat, view, plan.chat, natural);
+
+  // меряем уже изменённый столбец: его край мог уехать от смены ширины
+  const rect = chat.getBoundingClientRect();
+  const box = panelPosition(
+    kind,
+    { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+    plan.panel,
     view,
   );
 
-  applyChatSize(chat, natural, placed.chat);
-
-  return { box: placed.box, anchored: true };
-}
-
-export function releaseChat(): void {
-  restoreChat();
+  return { box, anchored: true };
 }
 
 /**
