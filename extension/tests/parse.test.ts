@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { extractRequisites, isValidCard, maskRequisite } from '../src/shared/parse.js';
+import { extractRequisites, isValidCard } from '../src/shared/parse.js';
 
 describe('isValidCard', () => {
   it('принимает валидные по Луну номера', () => {
@@ -56,16 +56,5 @@ describe('extractRequisites', () => {
   it('не падает на пустоте и мусоре', () => {
     assert.deepEqual(extractRequisites(''), []);
     assert.deepEqual(extractRequisites('...'), []);
-  });
-});
-
-describe('maskRequisite', () => {
-  it('маскирует середину', () => {
-    assert.equal(maskRequisite('4276380012345679'), '4276••••••••5679');
-    assert.equal(maskRequisite('79161234567'), '7916•••4567');
-  });
-
-  it('короткие значения прячет целиком', () => {
-    assert.equal(maskRequisite('1234'), '••••');
   });
 });

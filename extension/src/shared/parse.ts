@@ -58,11 +58,3 @@ export function extractRequisites(text: string): ParsedRequisite[] {
 
   return [...found.values()];
 }
-
-// 4276123412341234 → 4276••••1234
-export function maskRequisite(digits: string): string {
-  if (digits.length <= 4) return '•'.repeat(digits.length);
-  const head = digits.slice(0, Math.min(4, digits.length - 4));
-  const tail = digits.slice(-4);
-  return `${head}${'•'.repeat(Math.max(3, digits.length - head.length - 4))}${tail}`;
-}

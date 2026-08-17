@@ -117,8 +117,8 @@ const HTML = `
   <span class="logo">◆ BINANCE</span>
   <a>Купить криптовалюту</a><a>Рынки</a><a>Торговля</a><a>P2P</a>
   <span class="spacer"></span>
-  <label class="ctl">Ширина чата<input type="range" id="pg-w" min="280" max="720" step="8" value="0"></label>
-  <label class="ctl">Высота чата<input type="range" id="pg-h" min="220" max="900" step="20" value="0"></label>
+  <label class="ctl">Ширина чата<input type="range" id="pg-w" min="280" max="720" step="8" value="408"></label>
+  <label class="ctl">Высота чата<input type="range" id="pg-h" min="220" max="900" step="20" value="440"></label>
   <button class="close" data-place="chat-bottom">Под чатом</button>
   <button class="close" data-place="chat-left">Слева от чата</button>
   <button class="close" data-place="floating">Свободно</button>

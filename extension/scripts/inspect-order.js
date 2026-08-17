@@ -135,7 +135,7 @@
     inputCandidates: inputs.slice(0, 6),
     chatCandidates: chatBoxes,
     layout,
-    bapiPaths: [...new Set(bapi)].slice(0, 30),
+    bapiPaths: [...new Set(bapi)].slice(0, 90),
   };
 
   const text = JSON.stringify(report, null, 2);
