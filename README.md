@@ -461,3 +461,56 @@ cd extension && npm run build:prod
 4. Биллинг и публикация в Chrome Web Store.
 5. Вторая биржа — добавляется как ещё один адаптер, модель данных уже
    мультибиржевая (поле `exchange`).
+
+## Боевой деплой
+
+Локальный запуск через Docker описан выше — он для разработки и показа.
+Ниже то, что нужно, чтобы сервер жил в интернете и расширение работало
+у команды без запущенного ноутбука.
+
+### Сервер: Railway
+
+Стек подходит без переделок: Node 20, Fastify и PostgreSQL — всё, что
+Railway умеет из коробки. `HOST` уже `0.0.0.0`, порт берётся из `PORT`,
+адрес базы — из `DATABASE_URL`.
+
+1. Новый проект → **Add PostgreSQL**. Railway сам заведёт `DATABASE_URL`.
+2. **Add service → GitHub repo**, корень сервиса — папка `backend`.
+   Конфиг сборки уже лежит в `backend/railway.json`.
+3. Переменные окружения сервиса:
+
+   | Переменная | Значение |
+   |---|---|
+   | `DATABASE_URL` | ссылкой на переменную базы: `${{Postgres.DATABASE_URL}}` |
+   | `JWT_SECRET` | длинная случайная строка, не меньше 16 символов |
+   | `NODE_ENV` | `production` |
+   | `SEED_ADMIN_PASSWORD` | свой пароль, дефолтный `admin12345` в бой не годится |
+   | `CORS_ORIGINS` | адрес админки, например `https://admin.example.com` |
+   | `ALLOW_ANY_EXTENSION_ORIGIN` | `false` после того, как расширение получит
+     постоянный ID в магазине, до этого `true` |
+
+4. Деплой. Миграции накатываются сами: `npm start` сначала выполняет
+   `prisma migrate deploy`, потом поднимает сервер.
+5. Проверка: `https://<домен>/health` должен ответить `{"ok":true}`.
+6. Один раз завести админа: `npm run seed` через Railway shell.
+
+Render и Fly.io подойдут так же — ничего специфичного для Railway в коде нет.
+На VPS достаточно `docker compose` из `release/server`.
+
+### Расширение под боевой адрес
+
+Адрес API вшивается при сборке и попадает в `host_permissions` манифеста —
+без этого service worker получит отказ ещё до запроса:
+
+```bash
+PG_API_URL=https://ваш-домен/v1 npm run build:prod --prefix extension
+```
+
+Собранная папка `extension/dist` и есть то, что загружается в магазин.
+Без переменной подставляется `http://localhost:4000/v1` — как раньше.
+
+### Админка
+
+`admin` — обычная статика Vite. `npm run build` даёт папку `dist`, её можно
+положить куда угодно: отдельный сервис Railway, Netlify, Cloudflare Pages.
+Адрес админки нужно добавить в `CORS_ORIGINS` сервера.

@@ -1,5 +1,8 @@
 import type { Session, Settings } from './types.js';
 
+// подставляется сборщиком, см. scripts/build.mjs
+declare const __API_BASE_URL__: string;
+
 const KEYS = {
   session: 'pg.session',
   settings: 'pg.settings',
@@ -7,7 +10,7 @@ const KEYS = {
 } as const;
 
 export const DEFAULT_SETTINGS: Settings = {
-  apiBaseUrl: 'http://localhost:4000/v1',
+  apiBaseUrl: __API_BASE_URL__,
   // выключено намеренно: на страницу биржи не лезем без разрешения
   panelEnabled: false,
   autoSyncOrders: true,

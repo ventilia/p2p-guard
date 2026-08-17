@@ -205,6 +205,8 @@ async function run() {
     define: {
       'process.env.NODE_ENV': '"production"',
       __FONT_URL__: JSON.stringify(fontUrl),
+      // сети на стенде нет, но значение обязано существовать
+      __API_BASE_URL__: JSON.stringify('http://localhost:4000/v1'),
       __ADMIN_CSS__: JSON.stringify(await adminCss()),
     },
   });

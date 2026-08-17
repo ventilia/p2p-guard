@@ -1,0 +1,11 @@
+// сборка для продакшена: в dist уезжает только сервер
+// у корневого tsconfig rootDir=".", поэтому он раскладывал результат в dist/src,
+// а npm start искал dist/index.js и падал на любом хостинге
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": false
+  },
+  "include": ["src/**/*.ts"]
+}
