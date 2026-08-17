@@ -393,6 +393,47 @@ check(
   { avg: bare.json.exchangeStats?.avgAmountFiat, src: bare.json.statsSource },
 );
 
+// ───────────────────────────── Отзывы биржи ─────────────────────────────
+
+section('Отзывы с самой биржи');
+
+const withExchangeReviews = await call('/counterparties/lookup', {
+  method: 'POST',
+  ...T,
+  body: {
+    externalId: cpUid,
+    exchangeReviews: [
+      { rating: 'NEGATIVE', text: 'Отпустил только после апелляции', author: 'trader_kz', createdAt: new Date().toISOString() },
+      { rating: 'POSITIVE', text: 'Нормально', author: 'usdt_hunter', createdAt: new Date().toISOString() },
+    ],
+  },
+});
+check(
+  'отзывы биржи сохранены и вернулись',
+  withExchangeReviews.json.exchangeReviews?.length === 2 &&
+    withExchangeReviews.json.exchangeReviews?.[0]?.author === 'trader_kz',
+  withExchangeReviews.json.exchangeReviews,
+);
+
+// та же логика, что у статистики: пустой ответ биржи не должен стирать прошлый
+const withoutExchangeReviews = await call('/counterparties/lookup', {
+  method: 'POST',
+  ...T,
+  body: { externalId: cpUid, exchangeReviews: [] },
+});
+check(
+  'пустой список не затёр прошлые отзывы биржи',
+  withoutExchangeReviews.json.exchangeReviews?.length === 2,
+  withoutExchangeReviews.json.exchangeReviews,
+);
+
+check(
+  'наши отзывы и биржевые не смешиваются',
+  Array.isArray(withoutExchangeReviews.json.reviews) &&
+    withoutExchangeReviews.json.reviews.every((r) => r.author?.startsWith('P2P Guard')),
+  withoutExchangeReviews.json.reviews?.slice(0, 2),
+);
+
 // ───────────────────────────── Теги жалоб ─────────────────────────────
 
 section('Категории жалоб');

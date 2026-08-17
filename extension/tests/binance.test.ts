@@ -9,7 +9,9 @@ import {
   detectOrderId,
   extractFromPayload,
   findObjects,
+  looksLikeFeedback,
   looksLikeOrder,
+  normalizeFeedback,
   normalizeOrderDetail,
   normalizeStatus,
   normalizeUserDetail,
@@ -373,5 +375,94 @@ describe('извлечение из перехваченного ответа', 
     const cyclic: Record<string, unknown> = { orderNumber: '7', tradeType: 'BUY' };
     cyclic.self = cyclic;
     assert.doesNotThrow(() => findObjects(cyclic, looksLikeOrder));
+  });
+});
+
+/**
+ * Данные, которые видны в карточке контрагента на самой бирже: возраст
+ * аккаунта, верификации, исполнение за 30 дней. Раньше расширение их теряло,
+ * и панель показывала пустые поля там, где у биржи цифры есть.
+ */
+describe('карточка контрагента с биржи', () => {
+  it('читает верификации, дату регистрации и исполнение за 30 дней', () => {
+    const snapshot = normalizeUserDetail({
+      userNo: 's1e7e25dcd7b43cfaad5f417fecc658f9',
+      nickName: 'Jasik_2024',
+      registerTime: 1_666_224_000_000,
+      email: 'j***@mail.com',
+      mobileVerified: true,
+      kycVerified: 1,
+      userStatsRet: {
+        completedOrderNum: 637,
+        tradeCountOfLast30day: 402,
+        monthFinishRate: 99.3,
+        avgReleaseTimeOfLast30day: 278,
+        avgPayTimeOfLast30day: 167,
+        positiveCount: 78,
+        negativeCount: 3,
+      },
+    });
+
+    assert.equal(snapshot?.stats?.totalOrders, 637);
+    assert.equal(snapshot?.stats?.orders30d, 402);
+    assert.equal(snapshot?.stats?.completionRate30d, 0.993);
+    assert.equal(snapshot?.stats?.avgReleaseMinutes, 5);
+    assert.equal(snapshot?.stats?.avgPayMinutes, 3);
+    assert.equal(snapshot?.stats?.joinedAt, '2022-10-20T00:00:00.000Z');
+    assert.equal(snapshot?.stats?.emailVerified, true);
+    assert.equal(snapshot?.stats?.phoneVerified, true);
+    assert.equal(snapshot?.stats?.kycVerified, true);
+    // отзывов биржа отдельным числом не даёт, складываем плюсы и минусы
+    assert.equal(snapshot?.stats?.feedbackCount, 81);
+  });
+
+  it('не выдумывает верификации, которых нет в ответе', () => {
+    const snapshot = normalizeUserDetail({ userNo: 'x', nickName: 'y' });
+    assert.equal(snapshot?.stats?.emailVerified, null);
+    assert.equal(snapshot?.stats?.kycVerified, null);
+  });
+});
+
+describe('отзывы биржи', () => {
+  it('узнаёт отзыв по форме и различает знак оценки', () => {
+    const payload = {
+      data: [
+        { appraiseType: 0, content: 'Тянул два часа', authorNickName: 'trader_kz', createTime: 1_754_126_040_000 },
+        { appraiseType: 1, content: 'Всё быстро', authorNickName: 'usdt_hunter', createTime: 1_752_231_720_000 },
+      ],
+    };
+
+    const found = findObjects(payload, looksLikeFeedback);
+    assert.equal(found.length, 2);
+
+    const negative = normalizeFeedback(found[0]!);
+    assert.equal(negative.rating, 'NEGATIVE');
+    assert.equal(negative.author, 'trader_kz');
+    assert.equal(negative.text, 'Тянул два часа');
+
+    assert.equal(normalizeFeedback(found[1]!).rating, 'POSITIVE');
+  });
+
+  it('понимает словесную оценку', () => {
+    assert.equal(normalizeFeedback({ feedbackType: 'NEGATIVE', content: 'плохо' }).rating, 'NEGATIVE');
+    assert.equal(normalizeFeedback({ feedbackType: 'positive', content: 'ок' }).rating, 'POSITIVE');
+  });
+});
+
+/**
+ * UID пользователя лежит вторым сегментом куки p20t (`web.<uid>.<хэш>`).
+ * Это снято с живой сессии: раньше за ним ходили запросом к бирже, и на
+ * медленной сети попап успевал показать «не удалось определить UID».
+ */
+describe('UID из куки сессии', () => {
+  const uidFrom = (value: string) => /^web\.(\d{4,20})\./.exec(value)?.[1] ?? null;
+
+  it('достаёт номер аккаунта', () => {
+    assert.equal(uidFrom('web.540652971.32AAE53C226391C984EB2AB5AFED3EED'), '540652971');
+  });
+
+  it('не принимает чужой формат за UID', () => {
+    assert.equal(uidFrom('026085B099EEC5A7DB6D2A2948E88051'), null);
+    assert.equal(uidFrom('web..abc'), null);
   });
 });

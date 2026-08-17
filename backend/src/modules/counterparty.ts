@@ -24,10 +24,29 @@ const statsSchema = z
     negativeCount: z.number().int().nonnegative().nullish(),
     activeOrders: z.number().int().nonnegative().nullish(),
     merchantLevel: z.string().max(32).nullish(),
+    // то же, что биржа показывает в карточке контрагента
+    completionRate30d: z.number().min(0).max(1).nullish(),
+    joinedAt: z.string().max(40).nullish(),
+    emailVerified: z.boolean().nullish(),
+    phoneVerified: z.boolean().nullish(),
+    kycVerified: z.boolean().nullish(),
+    feedbackCount: z.number().int().nonnegative().nullish(),
+    followers: z.number().int().nonnegative().nullish(),
+    blockedBy: z.number().int().nonnegative().nullish(),
   })
   .partial();
 
 export type ExchangeStatsSnapshot = z.infer<typeof statsSchema>;
+
+// отзывы самой биржи: храним рядом со статистикой, отдельной таблицы не заводим
+const exchangeReviewSchema = z.object({
+  rating: z.enum(['POSITIVE', 'NEUTRAL', 'NEGATIVE']),
+  text: z.string().max(2000).nullish(),
+  author: z.string().max(64).nullish(),
+  createdAt: z.string().max(40).nullish(),
+});
+
+export type ExchangeReviewSnapshot = z.infer<typeof exchangeReviewSchema>;
 
 const orderSnapshotSchema = z.object({
   externalId: z.string().trim().min(1).max(64),
@@ -48,6 +67,7 @@ const lookupSchema = z.object({
   countryCode: z.string().trim().max(8).optional(),
   maskedPhone: z.string().trim().max(32).optional(),
   stats: statsSchema.optional(),
+  exchangeReviews: z.array(exchangeReviewSchema).max(50).optional(),
   order: orderSnapshotSchema.optional(),
 });
 
@@ -283,6 +303,7 @@ export async function buildDossier(
     },
     risk,
     exchangeStats: stats,
+    exchangeReviews: (counterparty.exchangeReviews ?? []) as ExchangeReviewSnapshot[],
     statsSource,
     statsUpdatedAt: counterparty.statsUpdatedAt,
     blacklist: blacklist.map((b) => ({
@@ -399,6 +420,10 @@ export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
     ...(stats.changed
       ? { exchangeStats: stats.value as Prisma.InputJsonValue, statsUpdatedAt: now }
       : {}),
+    // пустой список — «не смогли прочитать», прошлые отзывы не стираем
+    ...(input.exchangeReviews?.length
+      ? { exchangeReviews: input.exchangeReviews as unknown as Prisma.InputJsonValue }
+      : {}),
   };
 
   return prisma.counterparty.upsert({
@@ -489,11 +514,15 @@ export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
 
     const digits = normalizeDigits(q);
 
+    // порядок обязателен: без него срез отдавал случайные связки, и свежий
+    // владелец карты мог не попасть в выборку, хотя искали именно его.
+    // берём с запасом — у одного контрагента бывает несколько реквизитов
     const byRequisite = digits.length >= 6
       ? await prisma.counterpartyRequisite.findMany({
           where: { requisite: { value: { contains: digits } } },
           select: { counterpartyId: true },
-          take: limit,
+          orderBy: { lastSeenAt: 'desc' },
+          take: limit * 5,
         })
       : [];
 

@@ -5,6 +5,7 @@ import {
   extractFromPayload,
   fetchOrderDetail,
   fetchUserDetail,
+  fetchUserReviews,
   normalizeOrderDetail,
   normalizeUserDetail,
 } from './binance.js';
@@ -139,24 +140,32 @@ async function enrich(
     : counterparty;
 
   const hasStats = result.stats && Object.values(result.stats).some((v) => v !== null && v !== undefined);
-  if (hasStats) return result;
 
-  // профиль в перехвате не встретился, спросим сами
-  try {
-    const raw = await fetchUserDetail(result.externalId);
-    const detail = raw ? normalizeUserDetail(raw) : null;
-    if (detail) {
-      result = {
-        ...result,
-        nickname: result.nickname ?? detail.nickname,
-        countryCode: detail.countryCode ?? result.countryCode,
-        stats: detail.stats,
-      };
-      capture.users.set(result.externalId, result);
-    }
-  } catch (err) {
-    console.warn('[P2P Guard] профиль контрагента недоступен', err);
+  // профиль и отзывы биржи тянем параллельно: отзывы нужны, даже когда
+  // статистика уже пришла из перехвата
+  const [detail, reviews] = await Promise.all([
+    hasStats
+      ? Promise.resolve(null)
+      : fetchUserDetail(result.externalId)
+          .then((raw) => (raw ? normalizeUserDetail(raw) : null))
+          .catch((err) => {
+            console.warn('[P2P Guard] профиль контрагента недоступен', err);
+            return null;
+          }),
+    fetchUserReviews(result.externalId),
+  ]);
+
+  if (detail) {
+    result = {
+      ...result,
+      nickname: result.nickname ?? detail.nickname,
+      countryCode: detail.countryCode ?? result.countryCode,
+      stats: detail.stats,
+    };
   }
+  if (reviews.length) result = { ...result, exchangeReviews: reviews };
+
+  if (detail || reviews.length) capture.users.set(result.externalId, result);
 
   return result;
 }

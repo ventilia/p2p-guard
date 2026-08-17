@@ -1,12 +1,11 @@
 /**
- * Перехват ответов Binance на странице ордера.
+ * Перехват ответов Binance на странице ордера или профиля контрагента.
  *
- * Открыть ордер, F12 → Console, вставить весь файл, Enter.
- * Дальше поделать на странице то, что заставит её перезапросить данные:
- * открыть профиль контрагента, переключить вкладку ордера, нажать обновление
- * внутри страницы. Перезагружать страницу целиком НЕЛЬЗЯ — перехват слетит.
+ * F12 → Console → вставить весь файл → Enter. Появится зелёная строка «перехват включён».
+ * Дальше кликать по странице (профиль контрагента, «Инфо P2P», вкладка отзывов).
+ * Перезагружать страницу нельзя — перехват слетит.
  *
- * Когда наберётся несколько запросов, выполнить в консоли:  pgDump()
+ * Когда в консоли набежит несколько строк «поймано», выполнить:  pgDump()
  * Отчёт ляжет в буфер обмена.
  *
  * Токены, куки и подписи вырезаются, длинные строки обрезаются.
@@ -14,18 +13,19 @@
 (() => {
   if (window.__pgCapture) {
     console.log('%cПерехват уже стоит. Соберите данные и вызовите pgDump()', 'color:#b26a00');
-    return;
+    return window.__pgCapture.control;
   }
 
   const store = [];
-  window.__pgCapture = store;
+  const seen = new Set();
 
-  const INTERESTING = /bapi|c2c|otc/i;
-  const SECRET_KEY = /token|auth|cookie|secret|signature|session|password|jwt|csrf/i;
+  // ловим всё, что похоже на внутренний api биржи, а не только c2c
+  const INTERESTING = /\/bapi\/|c2c|otc|\/gateway-api\//i;
+  const SECRET_KEY = /token|auth|cookie|secret|signature|session|password|jwt|csrf|device/i;
 
-  // режем секреты и длинные хвосты: мне нужна форма ответа, а не его объём
+  // режем секреты и длинные хвосты: нужна форма ответа, а не его объём
   const clean = (value, depth = 0) => {
-    if (depth > 6) return '…';
+    if (depth > 7) return '…';
     if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
     if (typeof value === 'string') return value.length > 200 ? `${value.slice(0, 200)}…` : value;
     if (Array.isArray(value)) return value.slice(0, 3).map((v) => clean(v, depth + 1));
@@ -44,46 +44,62 @@
     try {
       return JSON.parse(text);
     } catch {
-      return text.slice(0, 200);
+      return typeof text === 'string' ? text.slice(0, 200) : null;
     }
   };
 
   const record = (method, url, requestBody, responseText) => {
-    if (!INTERESTING.test(url)) return;
-    let pathname = url;
+    if (!url || !INTERESTING.test(url)) return;
+
+    let path = url;
+    let query = null;
     try {
-      pathname = new URL(url, location.origin).pathname;
+      const parsed = new URL(url, location.origin);
+      path = parsed.pathname;
+      if (parsed.search) {
+        query = {};
+        for (const [k, v] of parsed.searchParams) {
+          query[k] = SECRET_KEY.test(k) ? '‹вырезано›' : v.slice(0, 80);
+        }
+      }
     } catch {
       // оставим как есть
     }
-    store.push({
-      method,
-      path: pathname,
-      request: clean(parse(requestBody)),
-      response: clean(parse(responseText)),
-    });
-    console.log(`%c[pg] поймано: ${method} ${pathname}`, 'color:#1a7f37');
+
+    // один и тот же путь второй раз ничего нового не расскажет
+    const key = `${method} ${path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    store.push({ method, path, query, request: clean(parse(requestBody)), response: clean(parse(responseText)) });
+    console.log(`%c[pg ${store.length}] поймано: ${key}`, 'color:#1a7f37');
   };
 
   // ─────────────────────────── fetch ───────────────────────────
 
   const origFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const response = await origFetch.apply(this, args);
+  window.fetch = function (...args) {
+    const promise = origFetch.apply(this, args);
     try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url ?? '';
+      const input = args[0];
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
       if (INTERESTING.test(url)) {
-        const body = args[1]?.body;
-        response
-          .clone()
-          .text()
-          .then((text) => record(args[1]?.method ?? 'GET', url, typeof body === 'string' ? body : null, text))
+        const init = args[1] || {};
+        const method = init.method || (input && input.method) || 'GET';
+        const body = typeof init.body === 'string' ? init.body : null;
+        promise
+          .then((response) =>
+            response
+              .clone()
+              .text()
+              .then((text) => record(method, url, body, text)),
+          )
           .catch(() => undefined);
       }
     } catch {
       // перехват не должен ломать страницу
     }
-    return response;
+    return promise;
   };
 
   // ─────────────────────────── XMLHttpRequest ───────────────────────────
@@ -98,10 +114,10 @@
   };
 
   XMLHttpRequest.prototype.send = function (body) {
-    if (INTERESTING.test(this.__pgUrl ?? '')) {
+    if (INTERESTING.test(this.__pgUrl || '')) {
       this.addEventListener('load', () => {
         try {
-          record(this.__pgMethod ?? 'GET', this.__pgUrl, typeof body === 'string' ? body : null, this.responseText);
+          record(this.__pgMethod || 'GET', this.__pgUrl, typeof body === 'string' ? body : null, this.responseText);
         } catch {
           // игнорируем
         }
@@ -112,27 +128,88 @@
 
   // ─────────────────────────── выгрузка ───────────────────────────
 
-  window.pgDump = () => {
-    if (!store.length) {
-      console.log('%cПока пусто. Поделайте что-нибудь на странице — но не перезагружайте её', 'color:#c62828');
-      return null;
-    }
-    const text = JSON.stringify(store, null, 2);
-    console.log(store);
+  // copy() есть не всегда, поэтому свой запасной путь через скрытое поле
+  const toClipboard = (text) => {
     try {
       copy(text);
-      console.log(`%cГотово: ${store.length} запросов скопировано в буфер`, 'color:#1a7f37;font-weight:600');
+      return true;
     } catch {
-      console.log('Скопируйте вывод выше вручную');
+      // ниже
     }
-    return store;
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.style.cssText = 'position:fixed;left:-9999px;top:0';
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand('copy');
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
   };
 
+  // пути, которые страница уже дёргала до включения перехвата: тел нет, но
+  // сам список эндпоинтов тоже полезен
+  const earlierPaths = () => {
+    const out = new Set();
+    for (const entry of performance.getEntriesByType('resource')) {
+      if (!INTERESTING.test(entry.name)) continue;
+      try {
+        out.add(new URL(entry.name).pathname);
+      } catch {
+        out.add(entry.name.slice(0, 120));
+      }
+    }
+    return [...out].slice(0, 40);
+  };
+
+  window.pgDump = () => {
+    const report = {
+      page: location.pathname + location.search.replace(/=[^&]+/g, '=…'),
+      captured: store,
+      pathsSeenEarlier: earlierPaths(),
+    };
+    const text = JSON.stringify(report, null, 2);
+
+    if (!store.length) {
+      console.log(
+        '%cТел ответов пока нет — страница ничего не перезапрашивала.\n' +
+          'Кликните по нику контрагента, откройте «Инфо P2P» или вкладку «Обратная связь».\n' +
+          'Список путей всё равно собран, его тоже можно прислать.',
+        'color:#b26a00',
+      );
+    }
+
+    console.log(report);
+    if (toClipboard(text)) {
+      console.log(
+        `%cГотово: ${store.length} ответов + ${report.pathsSeenEarlier.length} путей скопировано в буфер`,
+        'color:#1a7f37;font-weight:600',
+      );
+    } else {
+      console.log('Не скопировалось. Правый клик по объекту выше → Copy object');
+    }
+    return report;
+  };
+
+  window.pgStatus = () => {
+    console.log(`Поймано ответов: ${store.length}. Пути: ${[...seen].join(', ') || '—'}`);
+    return store.length;
+  };
+
+  const control = { store, dump: () => window.pgDump(), status: () => window.pgStatus() };
+  window.__pgCapture = { store, control };
+
   console.log(
-    '%cПерехват включён.%c Откройте профиль контрагента или переключите вкладку ордера,\n' +
-      'затем выполните:  pgDump()\n' +
-      'Страницу не перезагружайте — перехват слетит.',
-    'color:#1a7f37;font-weight:600',
+    '%c✓ Перехват включён.%c\n' +
+      '1. Кликните по нику контрагента, откройте «Инфо P2P» или «Обратная связь»\n' +
+      '2. Выполните:  pgDump()\n' +
+      'Страницу не перезагружайте.',
+    'color:#1a7f37;font-weight:600;font-size:13px',
     'color:inherit',
   );
+
+  return control;
 })();

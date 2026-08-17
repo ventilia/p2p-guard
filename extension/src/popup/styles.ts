@@ -218,6 +218,17 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 .seg button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
+.range { display: block; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+.range span { display: flex; justify-content: space-between; margin-bottom: 5px; }
+.range input[type=range] {
+  width: 100%; height: 3px; appearance: none;
+  background: var(--line-strong); cursor: pointer;
+}
+.range input[type=range]::-webkit-slider-thumb {
+  appearance: none; width: 13px; height: 13px;
+  background: var(--accent); border: 0; cursor: pointer;
+}
+
 .center { display: grid; place-items: center; gap: 9px; padding: 32px 0; text-align: center; }
 
 /* единственный круг, см. content/styles.ts */
@@ -373,6 +384,8 @@ td.mono { font-family: ${MONO_STACK}; color: var(--muted); }
 .status-chip.CANCELLED { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad); }
 .status-chip.APPEALING { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); }
 .scroll-y { max-height: 168px; overflow-y: auto; }
+
+.verify { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 
 .review { padding: 8px 0; border-top: 1px solid var(--line); }
 .review:first-of-type { border-top: 0; padding-top: 0; }

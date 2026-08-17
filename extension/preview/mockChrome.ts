@@ -86,6 +86,8 @@ async function handle(request: Record<string, unknown>): Promise<unknown> {
 
     case 'SET_SETTINGS':
       settings = { ...settings, ...(request.patch as Partial<Settings>) };
+      // как и настоящий background: панель должна переехать без перезагрузки
+      for (const listener of listeners) listener({ type: 'SETTINGS_CHANGED', settings });
       return { ok: true, data: settings };
 
     case 'AUTH_LOGOUT':
@@ -329,6 +331,12 @@ export function setTheme(theme: Settings['theme']): void {
   settings = { ...settings, theme };
   // панель подписана на PANEL_STATE, дёргаем его, чтобы перечитала тему
   push(structuredClone(panelState));
+  for (const listener of listeners) listener({ type: 'SETTINGS_CHANGED', settings });
+}
+
+// смена настроек со стенда, минуя попап
+export function patchSettings(patch: Partial<Settings>): void {
+  settings = { ...settings, ...patch };
   for (const listener of listeners) listener({ type: 'SETTINGS_CHANGED', settings });
 }
 

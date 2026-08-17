@@ -21,6 +21,13 @@ export type Session = {
   };
 };
 
+// куда цеплять панель в ордере: чат на странице ордера фиксированный и тянется
+// до низа экрана, поэтому «под чатом» означает подрезать чат и встать под ним
+export type PanelPlacement = 'chat-bottom' | 'chat-left' | 'floating';
+
+// шаблон либо подставляется в поле ввода, либо сразу уходит собеседнику
+export type TemplateMode = 'insert' | 'send';
+
 export type Settings = {
   apiBaseUrl: string;
   panelEnabled: boolean;
@@ -28,6 +35,10 @@ export type Settings = {
   captureChatRequisites: boolean;
   // светлая по умолчанию, 'auto' — как в системе
   theme: 'light' | 'dark' | 'auto';
+  panelPlacement: PanelPlacement;
+  panelWidth: number;
+  panelHeight: number;
+  templateMode: TemplateMode;
 };
 
 export type ExchangeStats = {
@@ -46,6 +57,23 @@ export type ExchangeStats = {
   negativeCount?: number | null;
   activeOrders?: number | null;
   merchantLevel?: string | null;
+  // ниже — то, что видно в карточке контрагента на самой бирже
+  completionRate30d?: number | null;
+  joinedAt?: string | null;
+  emailVerified?: boolean | null;
+  phoneVerified?: boolean | null;
+  kycVerified?: boolean | null;
+  feedbackCount?: number | null;
+  followers?: number | null;
+  blockedBy?: number | null;
+};
+
+// отзыв, оставленный на самой бирже
+export type ExchangeReview = {
+  rating: ReviewRating;
+  text: string | null;
+  author: string | null;
+  createdAt: string | null;
 };
 
 // совпадают с enum ReviewTag на бэкенде
@@ -90,6 +118,7 @@ export type CounterpartySnapshot = {
   countryCode?: string;
   maskedPhone?: string;
   stats?: ExchangeStats;
+  exchangeReviews?: ExchangeReview[];
 };
 
 // что удалось прочитать прямо со страницы, запасной источник
@@ -121,6 +150,8 @@ export type Dossier = {
   };
   risk: { score: number; level: RiskLevel; factors: RiskFactor[] };
   exchangeStats: ExchangeStats;
+  // отзывы самой биржи, показываем отдельно от наших
+  exchangeReviews: ExchangeReview[];
   blacklist: {
     id: string;
     scope: 'GLOBAL' | 'TEAM';

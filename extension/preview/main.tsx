@@ -2,12 +2,14 @@
 // каждый блок в своём Shadow DOM: имена классов у них пересекаются
 import './mockChrome';
 import {
+  patchSettings,
   resetPanel,
   showScenario,
   setBinanceSessionScenario,
   setTheme as setMockTheme,
 } from './mockChrome';
 import { installAdminMock } from './adminMock';
+import { closeOrderPage, openOrderPage } from './orderPage';
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Panel } from '../src/content/Panel';
@@ -139,6 +141,11 @@ function Toolbar() {
       ))}
 
       <span className="toolbar-sep" />
+      <button className="toolbar-btn accent" onClick={() => openDemoOrder()}>
+        ▦ Открыть демо-ордер Binance
+      </button>
+
+      <span className="toolbar-sep" />
       {/* Показывает, что состояние попапа переживает закрытие. */}
       <button className="toolbar-btn" onClick={() => remountPopup()} title="Как будто закрыли и открыли попап">
         ⟳ Переоткрыть попап
@@ -153,10 +160,61 @@ function Toolbar() {
 const toolbarHost = document.getElementById('toolbar');
 if (toolbarHost) createRoot(toolbarHost).render(<Toolbar />);
 
+// панель в потоке страницы — чтобы её было видно рядом с попапом
+let standPanel: ReturnType<typeof createRoot> | null = null;
 const panelHost = document.getElementById('panel-host');
+
 if (panelHost) {
   mountInShadow(panelHost, panelStyles(__FONT_URL__) + PANEL_OVERRIDE, (container) => {
-    createRoot(container).render(
+    container.id = 'stand-panel';
+    standPanel = createRoot(container);
+    standPanel.render(
+      <StrictMode>
+        <Panel />
+      </StrictMode>,
+    );
+  });
+}
+
+// ───────────────────────── Демо страницы ордера ─────────────────────────
+
+// вторая копия панели — уже без правок позиционирования, ровно как в проде:
+// так на стенде работает настоящая привязка к чату, а не её имитация
+let demoPanel: ReturnType<typeof createRoot> | null = null;
+let demoHost: HTMLElement | null = null;
+
+function unmountDemoPanel(): void {
+  demoPanel?.unmount();
+  demoPanel = null;
+  demoHost?.remove();
+  demoHost = null;
+
+  // возвращаем панель на стенд
+  const container = document.getElementById('panel-host')?.shadowRoot?.getElementById('stand-panel');
+  if (container && !standPanel) {
+    standPanel = createRoot(container);
+    standPanel.render(
+      <StrictMode>
+        <Panel />
+      </StrictMode>,
+    );
+  }
+}
+
+function openDemoOrder(): void {
+  // две панели не должны одновременно тянуть высоту одного чата
+  standPanel?.unmount();
+  standPanel = null;
+
+  openOrderPage(unmountDemoPanel, (panelPlacement) => patchSettings({ panelPlacement }));
+
+  demoHost = document.createElement('div');
+  demoHost.id = 'pg-demo-panel';
+  document.body.appendChild(demoHost);
+
+  mountInShadow(demoHost, panelStyles(__FONT_URL__), (container) => {
+    demoPanel = createRoot(container);
+    demoPanel.render(
       <StrictMode>
         <Panel />
       </StrictMode>,

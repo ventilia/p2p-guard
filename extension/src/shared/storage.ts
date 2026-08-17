@@ -13,6 +13,11 @@ export const DEFAULT_SETTINGS: Settings = {
   autoSyncOrders: true,
   captureChatRequisites: true,
   theme: 'light',
+  panelPlacement: 'chat-bottom',
+  panelWidth: 384,
+  panelHeight: 340,
+  // по умолчанию только подставляем: отправку решает трейдер
+  templateMode: 'insert',
 };
 
 export async function getSession(): Promise<Session | null> {

@@ -64,7 +64,33 @@ const scamDossier: Dossier = {
     positiveCount: 30,
     negativeCount: 6,
     merchantLevel: 'MERCHANT',
+    completionRate30d: 0.79,
+    joinedAt: '2025-04-09T00:00:00.000Z',
+    emailVerified: true,
+    phoneVerified: true,
+    kycVerified: false,
+    feedbackCount: 36,
   },
+  exchangeReviews: [
+    {
+      rating: 'NEGATIVE',
+      text: 'Оплатил, отпустил монеты только после апелляции. Тянул два часа.',
+      author: 'trader_kz',
+      createdAt: '2026-08-02T09:14:00.000Z',
+    },
+    {
+      rating: 'NEGATIVE',
+      text: 'Просил перевести на другую карту, отказался — начал грубить.',
+      author: 'almaty_p2p',
+      createdAt: '2026-07-28T17:40:00.000Z',
+    },
+    {
+      rating: 'POSITIVE',
+      text: 'Всё прошло нормально, быстро.',
+      author: 'usdt_hunter',
+      createdAt: '2026-07-11T11:02:00.000Z',
+    },
+  ],
   blacklist: [
     {
       id: 'bl-1',
@@ -290,7 +316,27 @@ const cleanDossier: Dossier = {
     positiveCount: 75,
     negativeCount: 0,
     merchantLevel: 'MERCHANT',
+    completionRate30d: 0.99,
+    joinedAt: '2026-03-01T00:00:00.000Z',
+    emailVerified: true,
+    phoneVerified: true,
+    kycVerified: true,
+    feedbackCount: 75,
   },
+  exchangeReviews: [
+    {
+      rating: 'POSITIVE',
+      text: 'Отпустил за минуту, вопросов нет.',
+      author: 'kzt_daily',
+      createdAt: '2026-08-14T08:20:00.000Z',
+    },
+    {
+      rating: 'POSITIVE',
+      text: 'Работаем не первый раз, всё чётко.',
+      author: 'shymkent_ex',
+      createdAt: '2026-08-05T13:55:00.000Z',
+    },
+  ],
   blacklist: [],
   reviews: [
     {
@@ -444,7 +490,12 @@ const settings: Settings = {
   panelEnabled: true,
   autoSyncOrders: true,
   captureChatRequisites: true,
-  theme: 'light',
+  // на стенде показываем подстройку под тему страницы
+  theme: 'auto',
+  panelPlacement: 'chat-bottom',
+  panelWidth: 384,
+  panelHeight: 340,
+  templateMode: 'insert',
 };
 
 // состав команды для вкладки «команда» в попапе

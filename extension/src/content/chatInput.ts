@@ -1,11 +1,15 @@
 // вставка текста в поле чата Binance
-// точная вёрстка страницы неизвестна и меняется, поэтому поле ищем эвристикой,
-// а не по одному селектору: иначе шаблоны отвалятся при первом же редизайне
+// на живой странице поле — textarea.bn-textarea-input с placeholder
+// «Введите сообщение здесь», но вёрстка биржи меняется, поэтому известный
+// селектор идёт первым, а следом та же эвристика, что и раньше
 
 type Candidate = { el: HTMLElement; score: number };
 
 const PLACEHOLDER_HINT = /сообщ|напиш|введ|message|type|chat/i;
 const CONTAINER_HINT = /chat|message|dialog|conversation/i;
+
+// подтверждено разведкой страницы ордера
+const KNOWN_INPUT = 'textarea.bn-textarea-input';
 
 function isVisible(el: HTMLElement): boolean {
   const style = getComputedStyle(el);
@@ -43,6 +47,9 @@ function score(el: HTMLElement): number {
 }
 
 export function findChatInput(): HTMLElement | null {
+  const known = document.querySelector<HTMLElement>(KNOWN_INPUT);
+  if (known && isVisible(known)) return known;
+
   const nodes = Array.from(
     document.querySelectorAll<HTMLElement>(
       'textarea:not([readonly]):not([disabled]), [contenteditable="true"]',
@@ -77,16 +84,43 @@ function join(existing: string, addition: string): string {
   return `${trimmed} ${addition}`;
 }
 
-export function insertIntoChat(text: string): boolean {
+// отправка: сначала ищем кнопку рядом с полем, иначе жмём Enter как человек
+function submitChat(el: HTMLElement): void {
+  const form = el.closest('form');
+  const scope = (form ?? el.parentElement?.parentElement ?? el.parentElement) as HTMLElement | null;
+
+  const button = Array.from(
+    scope?.querySelectorAll<HTMLElement>('button, [role="button"]') ?? [],
+  ).find((b) => {
+    const marker = `${b.className} ${b.getAttribute('aria-label') ?? ''} ${b.textContent ?? ''}`;
+    return /send|отправ|submit/i.test(marker) && !(b as HTMLButtonElement).disabled;
+  });
+
+  if (button) {
+    button.click();
+    return;
+  }
+
+  for (const type of ['keydown', 'keypress', 'keyup'] as const) {
+    el.dispatchEvent(
+      new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }),
+    );
+  }
+}
+
+export function insertIntoChat(text: string, send = false): boolean {
   const el = findChatInput();
   if (!el) return false;
 
   el.focus();
 
   if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
-    setNativeValue(el, join(el.value, text));
+    // при отправке черновик не приклеиваем: уйдёт чужой текст вместе с шаблоном
+    setNativeValue(el, send ? text : join(el.value, text));
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.setSelectionRange(el.value.length, el.value.length);
+    // React обновляет состояние кнопки не синхронно, отправляем следующим тиком
+    if (send) setTimeout(() => submitChat(el), 60);
     return true;
   }
 

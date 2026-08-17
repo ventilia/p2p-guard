@@ -10,6 +10,9 @@ import {
 } from '../shared/icons.js';
 import { DossierView, type DossierActions } from '../ui/dossier.js';
 import { insertIntoChat } from './chatInput.js';
+import { computeLayout, releaseChat, watchLayout, type AnchorBox } from './anchor.js';
+import { watchPageTheme, type PageTheme } from './pageTheme.js';
+import { DEFAULT_SETTINGS } from '../shared/storage.js';
 import type { PanelState, Settings } from '../shared/types.js';
 
 // единая точка вызова background с обработкой ответа-состояния
@@ -72,10 +75,17 @@ const SOURCE_LABEL: Record<string, string> = {
 
 export function Panel() {
   const [state, setState] = useState<PanelState>({ status: 'idle' });
-  const [theme, setTheme] = useState<Settings['theme']>('light');
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [collapsed, setCollapsed] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [box, setBox] = useState<AnchorBox | null>(null);
+  const [pageTheme, setPageTheme] = useState<PageTheme>(null);
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
+
+  // «как в системе» на странице биржи означает «как у биржи»
+  const theme = settings.theme === 'auto' && pageTheme ? pageTheme : settings.theme;
+
+  useEffect(() => watchPageTheme(setPageTheme), []);
 
   const applyState = useCallback((next: PanelState) => setState(next), []);
   const { run, busy, error, setError } = usePanelAction(applyState);
@@ -86,10 +96,8 @@ export function Panel() {
 
     const listener = (message: { type?: string; state?: PanelState; settings?: Settings }) => {
       if (message?.type === 'PANEL_STATE' && message.state) setState(message.state);
-      // тему меняют из попапа, панель перекрашивается без перезагрузки
-      if (message?.type === 'SETTINGS_CHANGED' && message.settings?.theme) {
-        setTheme(message.settings.theme);
-      }
+      // настройки меняют из попапа, панель переезжает без перезагрузки
+      if (message?.type === 'SETTINGS_CHANGED' && message.settings) setSettings(message.settings);
     };
     chrome.runtime.onMessage.addListener(listener);
 
@@ -97,7 +105,7 @@ export function Panel() {
       if (alive && response.ok && response.data) setState(response.data);
     });
     void sendMessage<Settings>({ type: 'GET_SETTINGS' }).then((response) => {
-      if (alive && response.ok && response.data?.theme) setTheme(response.data.theme);
+      if (alive && response.ok && response.data) setSettings(response.data);
     });
 
     return () => {
@@ -105,6 +113,30 @@ export function Panel() {
       chrome.runtime.onMessage.removeListener(listener);
     };
   }, []);
+
+  // привязка к чату: пока панель свёрнута или скрыта, чат трогать не за что
+  const active = state.status !== 'idle' && !collapsed;
+
+  useEffect(() => {
+    if (!active) {
+      releaseChat();
+      setBox(null);
+      return undefined;
+    }
+    return watchLayout(() => {
+      const layout = computeLayout(settings.panelPlacement, settings.panelWidth, settings.panelHeight);
+      // сравниваем по значению: иначе каждый кадр давал бы новый рендер
+      setBox((prev) =>
+        prev &&
+        prev.top === layout.box.top &&
+        prev.left === layout.box.left &&
+        prev.width === layout.box.width &&
+        prev.height === layout.box.height
+          ? prev
+          : layout.box,
+      );
+    });
+  }, [active, settings.panelPlacement, settings.panelWidth, settings.panelHeight]);
 
   // перетаскивание за шапку
   useEffect(() => {
@@ -134,7 +166,7 @@ export function Panel() {
 
   const toggleTheme = () => {
     const next: Settings['theme'] = theme === 'dark' ? 'light' : 'dark';
-    setTheme(next);
+    setSettings((prev) => ({ ...prev, theme: next }));
     void sendMessage({ type: 'SET_SETTINGS', patch: { theme: next } });
   };
 
@@ -142,6 +174,11 @@ export function Panel() {
 
   const transform = `translate(${offset.x}px, ${offset.y}px)`;
   const ready = state.status === 'ready' ? state : null;
+
+  // привязанная панель живёт в координатах чата, свободная — в правом верхнем углу
+  const rootStyle = box
+    ? { transform, top: box.top, left: box.left, right: 'auto', width: box.width, maxHeight: box.height }
+    : { transform };
 
   if (collapsed) {
     const level = ready?.dossier.risk.level ?? null;
@@ -181,11 +218,11 @@ export function Panel() {
         scope,
       }),
     onRevokeBlacklist: (entryId) => void run({ type: 'REVOKE_BLACKLIST', entryId }),
-    onUseTemplate: insertIntoChat,
+    onUseTemplate: (text) => insertIntoChat(text, settings.templateMode === 'send'),
   };
 
   return (
-    <div className="root" data-theme={theme} style={{ transform }}>
+    <div className="root" data-theme={theme} style={rootStyle}>
       <div className="header" onMouseDown={startDrag}>
         <LogoMark size={26} />
         <div>

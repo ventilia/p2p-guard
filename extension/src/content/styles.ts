@@ -295,6 +295,8 @@ td.mono { font-family: ${MONO_STACK}; color: var(--muted); }
 
 /* ───────────────────────────── Отзывы ───────────────────────────── */
 
+.verify { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+
 .review { padding: 8px 0; border-top: 1px solid var(--line); }
 .review:first-of-type { border-top: 0; padding-top: 0; }
 .review-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted); }

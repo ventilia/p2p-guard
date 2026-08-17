@@ -3,6 +3,7 @@
 // всё идёт под сессией пользователя, cookie наружу не уходит
 import type {
   CounterpartySnapshot,
+  ExchangeReview,
   ExchangeStats,
   OrderSide,
   OrderSnapshot,
@@ -30,13 +31,24 @@ const ENDPOINT_CANDIDATES = {
     '/bapi/c2c/v1/friendly/c2c/user/base-detail',
     '/bapi/c2c/v2/public/c2c/userCenter/getUserBaseDetail',
   ],
+  // отзывы биржи под карточкой контрагента, вкладка «Обратная связь»
+  userReviews: [
+    '/bapi/c2c/v2/friendly/c2c/user/feedback/list',
+    '/bapi/c2c/v1/friendly/c2c/user/feedback/list',
+    '/bapi/c2c/v2/friendly/c2c/user/feedback/search',
+  ],
+  // сняты с живой страницы ордера, а не подобраны
   selfProfile: [
-    '/bapi/accounts/v1/private/account/user/base-detail',
-    '/bapi/accounts/v1/protect/account/user/base-detail',
+    '/bapi/accounts/v1/private/account/get-user-base-info',
+    '/bapi/c2c/v1/private/c2c/user/profile',
+    '/bapi/accounts/v1/private/account/user/userInfo',
   ],
 } as const;
 
 type EndpointKind = keyof typeof ENDPOINT_CANDIDATES;
+
+// свой профиль страница запрашивает методом GET, остальное — POST
+const GET_KINDS = new Set<EndpointKind>(['selfProfile']);
 
 // одиночный запрос не должен подвешивать всю проверку
 const REQUEST_TIMEOUT_MS = 7000;
@@ -59,12 +71,31 @@ type Route = {
 const SESSION_COOKIES = ['p20t', 'cr00', 'logined'] as const;
 const CSRF_COOKIES = ['csrftoken', 'p20t', 'cr00'] as const;
 
+// в этих куках биржа хранит значение вида web.<uid>.<хэш>
+const UID_COOKIES = ['p20t', 'r20t', 'd1og', 'r2o1', 'f30l'] as const;
+
 async function binanceCookies(): Promise<chrome.cookies.Cookie[]> {
   try {
     return await chrome.cookies.getAll({ domain: '.binance.com' });
   } catch {
     return [];
   }
+}
+
+/**
+ * UID пользователя прямо из куки: значение p20t выглядит как
+ * `web.540652971.<хэш>`, то есть номер аккаунта лежит вторым сегментом.
+ * Раньше за ним ходили запросом, и на медленной сети попап успевал показать
+ * «не удалось определить UID» — теперь сеть для этого не нужна вовсе.
+ */
+export async function readOwnUidFromCookies(): Promise<string | null> {
+  const cookies = await binanceCookies();
+  for (const name of UID_COOKIES) {
+    const value = cookies.find((c) => c.name === name)?.value;
+    const uid = /^web\.(\d{4,20})\./.exec(value ?? '')?.[1];
+    if (uid) return uid;
+  }
+  return null;
 }
 
 // не криптография: нужен только чтобы заметить смену аккаунта
@@ -180,6 +211,8 @@ async function buildHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
     clienttype: 'web',
+    // c2c-эндпоинты страница зовёт именно с этим заголовком
+    c2ctype: 'c2c_web',
     ...current.headers,
   };
 
@@ -192,6 +225,19 @@ async function buildHeaders(): Promise<Record<string, string>> {
       }
     }
   }
+
+  // антифрод-заголовки страницы: часть из них лежит в куках, её и подставляем
+  const cookieHeaders: [string, string][] = [
+    ['bnc-uuid', 'bnc-uuid'],
+    ['fvideo-id', 'BNC_FV_KEY'],
+    ['lang', 'lang'],
+  ];
+  for (const [header, cookie] of cookieHeaders) {
+    if (headers[header]) continue;
+    const value = cookies.find((c) => c.name === cookie)?.value;
+    if (value) headers[header] = value;
+  }
+
   return headers;
 }
 
@@ -200,14 +246,14 @@ async function attempt<T>(
   host: string,
   path: string,
   headers: Record<string, string>,
-  body: Record<string, unknown>,
+  body: Record<string, unknown> | null,
   signal: AbortSignal,
 ): Promise<{ host: string; data: T }> {
   const response = await fetch(`${host}${path}`, {
-    method: 'POST',
+    method: body ? 'POST' : 'GET',
     credentials: 'include',
     headers,
-    body: JSON.stringify(body),
+    body: body ? JSON.stringify(body) : undefined,
     signal,
   });
 
@@ -248,9 +294,10 @@ const isNotOnExchange = (err: unknown) =>
 
 // хосты для одного пути пробуем параллельно и берём первый успех
 // выученную пару сохраняем, поэтому со второго раза запрос ровно один
-async function post<T>(kind: EndpointKind, body: Record<string, unknown>): Promise<T> {
+async function post<T>(kind: EndpointKind, payload: Record<string, unknown>): Promise<T> {
   const [headers, current] = await Promise.all([buildHeaders(), getRoute()]);
 
+  const body = GET_KINDS.has(kind) ? null : payload;
   const known = current.paths[kind];
 
   // маршрут выучен — идём одним запросом, без веера по хостам
@@ -393,6 +440,11 @@ export const looksLikeUser = (obj: Record<string, unknown>): boolean =>
     'positiveRate',
   ]);
 
+// похоже на отзыв биржи: есть оценка и что-то от автора
+export const looksLikeFeedback = (obj: Record<string, unknown>): boolean =>
+  hasAny(obj, ['appraiseType', 'feedbackType', 'positiveOrNegative', 'appraise']) &&
+  hasAny(obj, ['content', 'remark', 'appraiseContent', 'authorNickName', 'nickName', 'createTime']);
+
 // ───────────────────────────── Нормализация ─────────────────────────────
 
 // числовые коды сверены с поведением страницы, строковые — с документацией C2C
@@ -453,6 +505,17 @@ const pick = (obj: Record<string, unknown>, keys: string[]): unknown => {
     if (value !== undefined && value !== null && value !== '') return value;
   }
   return undefined;
+};
+
+// биржа отдаёт признаки верификации то булевыми, то строкой, то 1/0
+const toFlag = (value: unknown): boolean | null => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).toLowerCase();
+  if (text === '1' || text === 'true' || text === 'y') return true;
+  if (text === '0' || text === 'false' || text === 'n') return false;
+  // непустая строка вроде замаскированной почты сама по себе означает «есть»
+  return true;
 };
 
 const daysSince = (ms: number | undefined): number | undefined =>
@@ -577,6 +640,8 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
   const positiveCount = toNumber(pick(s, ['positiveCount', 'goodAppraiseCount']));
   const negativeCount = toNumber(pick(s, ['negativeCount', 'badAppraiseCount']));
 
+  const registerTime = toNumber(pick(detail, ['registerTime', 'registerDate', 'createTime']));
+
   const totalOrders = toNumber(
     pick(s, ['completedOrderNum', 'totalFinishCount', 'totalOrderCount', 'orderCount']),
   );
@@ -607,6 +672,20 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
     positiveCount: positiveCount ?? null,
     negativeCount: negativeCount ?? null,
     merchantLevel: toText(pick(detail, ['merchantLevel', 'userType'])) ?? null,
+    // всё, что карточка контрагента показывает на самой бирже
+    completionRate30d:
+      toShare(toNumber(pick(s, ['monthFinishRate', 'finishRateOfLast30day']))) ?? null,
+    joinedAt: registerTime ? new Date(registerTime).toISOString() : null,
+    emailVerified: toFlag(pick(detail, ['emailVerified', 'email'])),
+    phoneVerified: toFlag(pick(detail, ['mobileVerified', 'smsVerified', 'mobile'])),
+    kycVerified: toFlag(pick(detail, ['kycVerified', 'identityVerified', 'realNameVerified'])),
+    feedbackCount:
+      toNumber(pick(s, ['feedbackCount', 'appraiseCount'])) ??
+      (positiveCount !== undefined && negativeCount !== undefined
+        ? positiveCount + negativeCount
+        : null),
+    followers: toNumber(pick(s, ['followerCount', 'followers'])) ?? null,
+    blockedBy: toNumber(pick(s, ['blockedCount', 'blackListCount'])) ?? null,
   };
 
   return {
@@ -614,6 +693,22 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
     nickname: toText(pick(detail, ['nickName', 'nickname', 'userName'])),
     countryCode: toText(pick(detail, ['countryCode', 'country'])),
     stats,
+  };
+}
+
+// биржа кодирует оценку по-разному: 1/0, 'positive'/'negative', true/false
+export function normalizeFeedback(raw: Record<string, unknown>): ExchangeReview {
+  const rawRating = pick(raw, ['appraiseType', 'feedbackType', 'positiveOrNegative', 'appraise']);
+  const asText = String(rawRating ?? '').toLowerCase();
+  const negative = asText === '0' || asText === '2' || asText === 'false' || /neg|bad|плох/.test(asText);
+
+  const createdAt = toNumber(pick(raw, ['createTime', 'createDate', 'updateTime']));
+
+  return {
+    rating: negative ? 'NEGATIVE' : 'POSITIVE',
+    text: toText(pick(raw, ['content', 'remark', 'appraiseContent'])) ?? null,
+    author: toText(pick(raw, ['authorNickName', 'nickName', 'nickname', 'userNo'])) ?? null,
+    createdAt: createdAt ? new Date(createdAt).toISOString() : null,
   };
 }
 
@@ -648,12 +743,27 @@ export async function fetchUserDetail(userNo: string): Promise<Record<string, un
 }
 
 export async function fetchOwnUserNo(): Promise<string | null> {
+  // кука отвечает мгновенно и не зависит от доступности биржи
+  const fromCookie = await readOwnUidFromCookies();
+  if (fromCookie) return fromCookie;
+
   try {
     const raw = await post<unknown>('selfProfile', {});
     const found = findObjects(raw, (obj) => hasAny(obj, ['userNo', 'userId', 'uid']))[0];
     return found ? (toText(pick(found, ['userNo', 'userId', 'uid'])) ?? null) : null;
   } catch {
     return null;
+  }
+}
+
+// отзывы биржи; путь пока не подтверждён живым ответом, поэтому молча пустой
+// список вместо ошибки — досье должно собираться и без них
+export async function fetchUserReviews(userNo: string): Promise<ExchangeReview[]> {
+  try {
+    const raw = await post<unknown>('userReviews', { userNo, page: 1, rows: 20 });
+    return findObjects(raw, looksLikeFeedback).map(normalizeFeedback).slice(0, 20);
+  } catch {
+    return [];
   }
 }
 

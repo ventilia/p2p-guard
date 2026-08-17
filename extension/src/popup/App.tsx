@@ -1272,6 +1272,86 @@ function SettingsTab({
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-title">Панель в ордере</div>
+        <div className="seg">
+          {(
+            [
+              ['chat-bottom', 'Под чатом'],
+              ['chat-left', 'Слева от чата'],
+              ['floating', 'Свободно'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              className={settings?.panelPlacement === value ? 'active' : ''}
+              onClick={() => void onSettings({ panelPlacement: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="d" style={{ marginTop: 6 }}>
+          «Под чатом» ужимает окно переписки Binance и занимает освободившееся место, ничего не
+          перекрывая
+        </div>
+
+        <label className="range">
+          <span>
+            Высота панели <b className="mono">{settings?.panelHeight ?? 340} px</b>
+          </span>
+          <input
+            type="range"
+            min={200}
+            max={640}
+            step={20}
+            value={settings?.panelHeight ?? 340}
+            onChange={(e) => void onSettings({ panelHeight: Number(e.target.value) })}
+          />
+        </label>
+
+        {settings?.panelPlacement !== 'chat-bottom' ? (
+          <label className="range">
+            <span>
+              Ширина панели <b className="mono">{settings?.panelWidth ?? 384} px</b>
+            </span>
+            <input
+              type="range"
+              min={280}
+              max={560}
+              step={8}
+              value={settings?.panelWidth ?? 384}
+              onChange={(e) => void onSettings({ panelWidth: Number(e.target.value) })}
+            />
+          </label>
+        ) : null}
+      </div>
+
+      <div className="card">
+        <div className="card-title">Шаблоны ответов</div>
+        <div className="seg">
+          {(
+            [
+              ['insert', 'Вставлять в поле'],
+              ['send', 'Сразу отправлять'],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              className={(settings?.templateMode ?? 'insert') === value ? 'active' : ''}
+              onClick={() => void onSettings({ templateMode: value })}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="d" style={{ marginTop: 6 }}>
+          {settings?.templateMode === 'send'
+            ? 'Нажатие на шаблон отправит сообщение контрагенту немедленно'
+            : 'Текст подставится в поле ввода Binance — отправите сами'}
+        </div>
+      </div>
+
       <button className="btn block" disabled={syncing} onClick={() => void sync()}>
         <IconRefresh size={14} /> {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
       </button>

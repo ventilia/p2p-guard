@@ -99,6 +99,7 @@ h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; letter-spacing: -.015em
 }
 .toolbar-btn:hover { background: var(--surface-3); }
 .toolbar-btn.active { background: var(--text); border-color: var(--text); color: var(--surface); }
+.toolbar-btn.accent { background: var(--accent); border-color: var(--accent); color: #16181d; font-weight: 600; }
 
 section { margin-bottom: 30px; }
 .section-head {

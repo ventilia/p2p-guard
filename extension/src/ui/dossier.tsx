@@ -219,6 +219,17 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
   const total = positive + negative;
   const rate = s.positiveRate ?? (total ? positive / total : null);
 
+  // биржа не всегда отдаёт признаки верификации, показываем только известные
+  const verifications: [string, boolean][] = (
+    [
+      ['Почта', s.emailVerified],
+      ['SMS', s.phoneVerified],
+      ['Личность', s.kycVerified],
+    ] as [string, boolean | null | undefined][]
+  )
+    .filter(([, ok]) => typeof ok === 'boolean')
+    .map(([label, ok]) => [label, ok as boolean]);
+
   return (
     <div className="card">
       <div className="card-title">
@@ -289,7 +300,41 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
             <span className="stat-v">{fmtMinutes(s.avgPayMinutes)}</span>
           </div>
         </div>
+
+        <div className="stat">
+          <div className="stat-name">Исполнение</div>
+          <div className="stat-pair">
+            <span className="stat-k">Всё время</span>
+            <span className="stat-v">{fmtPercent(s.completionRate)}</span>
+          </div>
+          <div className="stat-pair">
+            <span className="stat-k">30 дней</span>
+            <span className="stat-v">{fmtPercent(s.completionRate30d)}</span>
+          </div>
+        </div>
+
+        <div className="stat">
+          <div className="stat-name">Аккаунт</div>
+          <div className="stat-pair">
+            <span className="stat-k">Создан</span>
+            <span className="stat-v">{s.joinedAt ? fmtDate(s.joinedAt) : '—'}</span>
+          </div>
+          <div className="stat-pair">
+            <span className="stat-k">Отзывов</span>
+            <span className="stat-v">{fmtNumber(s.feedbackCount)}</span>
+          </div>
+        </div>
       </div>
+
+      {verifications.length ? (
+        <div className="verify">
+          {verifications.map(([label, ok]) => (
+            <span key={label} className={`badge ${ok ? 'ok' : 'bad'}`}>
+              {ok ? '✓' : '✕'} {label}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -298,6 +343,10 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
 export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
   const s = dossier.exchangeStats;
   const negative = s.negativeCount ?? 0;
+  // сначала отрицательные: ради них карточку и открывают
+  const items = [...(dossier.exchangeReviews ?? [])]
+    .sort((a, b) => Number(b.rating === 'NEGATIVE') - Number(a.rating === 'NEGATIVE'))
+    .slice(0, 6);
 
   return (
     <div className="card">
@@ -313,6 +362,24 @@ export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
       ) : (
         <div className="muted">Плохие отзывы отсутствуют</div>
       )}
+
+      {items.length ? (
+        <div className="reviews" style={{ marginTop: 9 }}>
+          {items.map((r, i) => (
+            <div key={`${r.author ?? 'anon'}-${i}`} className="review">
+              <div className="review-head">
+                <span className={`badge ${r.rating === 'NEGATIVE' ? 'bad' : 'ok'}`}>
+                  {r.rating === 'NEGATIVE' ? <IconThumbDown size={12} /> : <IconThumbUp size={12} />}
+                  {r.author ?? 'Аноним'}
+                </span>
+                <span className="spacer" style={{ flex: 1 }} />
+                {r.createdAt ? <span className="muted mono">{fmtDate(r.createdAt)}</span> : null}
+              </div>
+              {r.text ? <div className="review-text">{r.text}</div> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

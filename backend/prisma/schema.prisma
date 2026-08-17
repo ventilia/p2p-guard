@@ -204,7 +204,9 @@ model Counterparty {
   maskedPhone    String?
   /// снимок публичной статистики биржи
   exchangeStats  Json?
-  statsUpdatedAt DateTime?
+  /// отзывы с самой биржи, снимок вкладки «Обратная связь»
+  exchangeReviews Json?
+  statsUpdatedAt  DateTime?
 
   firstSeenAt DateTime @default(now())
   lastSeenAt  DateTime @default(now())
