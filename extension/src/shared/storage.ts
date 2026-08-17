@@ -16,6 +16,8 @@ export const DEFAULT_SETTINGS: Settings = {
   panelPlacement: 'chat-bottom',
   panelWidth: 384,
   panelHeight: 340,
+  chatWidth: 0,
+  chatHeight: 0,
   // по умолчанию только подставляем: отправку решает трейдер
   templateMode: 'insert',
 };

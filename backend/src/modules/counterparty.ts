@@ -33,6 +33,11 @@ const statsSchema = z
     feedbackCount: z.number().int().nonnegative().nullish(),
     followers: z.number().int().nonnegative().nullish(),
     blockedBy: z.number().int().nonnegative().nullish(),
+    // страна подтверждения аккаунта и то, откуда мы её узнали
+    kycCountry: z.string().trim().toUpperCase().min(2).max(3).nullish(),
+    kycCountrySource: z.enum(['exchange', 'phone']).nullish(),
+    totalVolumeFiat: z.number().nonnegative().nullish(),
+    volume30dFiat: z.number().nonnegative().nullish(),
   })
   .partial();
 
@@ -322,8 +327,8 @@ export async function buildDossier(
       tag: r.tag,
       text: r.text,
       createdAt: r.createdAt,
-      // личность автора не раскрываем
-      author: `P2P Guard (UID ${maskUid(r.author.binanceUid)})`,
+      // личность автора не раскрываем, но подписываем, что UID именно биржевой
+      author: `Трейдер P2P Guard · UID Binance ${maskUid(r.author.binanceUid)}`,
       isOwn: r.authorId === auth.user.id,
       isTeam: Boolean(teamId && r.author.teamId === teamId),
       canDelete: auth.isAdmin || r.authorId === auth.user.id,
@@ -356,15 +361,18 @@ export async function buildDossier(
         isTeam: Boolean(teamId && o.user.teamId === teamId),
       })),
     },
+    // реквизит показываем целиком: трейдер должен сверить номер с тем, что
+    // ему прислали в чат, а по звёздочкам этого не сделать
     requisites: reqLinks.map((l) => ({
       id: l.requisiteId,
       type: l.requisite.type,
-      mask: l.requisite.mask,
+      value: l.requisite.value,
       timesSeen: l.timesSeen,
       lastSeenAt: l.lastSeenAt,
       blacklisted: flaggedByRequisite.has(l.requisiteId),
+      // это контрагенты, а не наши пользователи — их UID не прячем
       alsoUsedBy: (flaggedByRequisite.get(l.requisiteId) ?? []).map(
-        (c) => c.nickname ?? maskUid(c.externalId),
+        (c) => c.nickname ?? c.externalId,
       ),
     })),
   };

@@ -206,7 +206,11 @@ function openDemoOrder(): void {
   standPanel?.unmount();
   standPanel = null;
 
-  openOrderPage(unmountDemoPanel, (panelPlacement) => patchSettings({ panelPlacement }));
+  openOrderPage(
+    unmountDemoPanel,
+    (panelPlacement) => patchSettings({ panelPlacement }),
+    (patch) => patchSettings(patch),
+  );
 
   demoHost = document.createElement('div');
   demoHost.id = 'pg-demo-panel';

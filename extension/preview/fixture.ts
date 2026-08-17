@@ -70,6 +70,12 @@ const scamDossier: Dossier = {
     phoneVerified: true,
     kycVerified: false,
     feedbackCount: 36,
+    kycCountry: 'AZE',
+    kycCountrySource: 'phone',
+    totalVolumeFiat: 4_411_725,
+    volume30dFiat: 264_648,
+    followers: 12,
+    blockedBy: 9,
   },
   exchangeReviews: [
     {
@@ -258,7 +264,7 @@ const scamDossier: Dossier = {
     {
       id: 'rq-1',
       type: 'CARD',
-      mask: '2202••••7431',
+      value: '2202301145127431',
       timesSeen: 4,
       lastSeenAt: hoursAgo(2),
       blacklisted: true,
@@ -267,7 +273,7 @@ const scamDossier: Dossier = {
     {
       id: 'rq-2',
       type: 'PHONE',
-      mask: '+7916•••4567',
+      value: '+79161234567',
       timesSeen: 2,
       lastSeenAt: daysAgo(9),
       blacklisted: false,
@@ -322,6 +328,12 @@ const cleanDossier: Dossier = {
     phoneVerified: true,
     kycVerified: true,
     feedbackCount: 75,
+    kycCountry: 'KAZ',
+    kycCountrySource: 'exchange',
+    totalVolumeFiat: 1_635_291,
+    volume30dFiat: 133_825,
+    followers: 148,
+    blockedBy: 0,
   },
   exchangeReviews: [
     {
@@ -431,7 +443,7 @@ const cleanDossier: Dossier = {
     {
       id: 'rq-c1',
       type: 'CARD',
-      mask: '4276••••1234',
+      value: '4276380012341234',
       timesSeen: 9,
       lastSeenAt: hoursAgo(1),
       blacklisted: false,
@@ -457,7 +469,7 @@ const scamPanelState: PanelState = {
   source: 'intercept',
   role: 'TEAM_LEAD',
   hasTeam: true,
-  requisiteAlert: { mask: '2202••••7431', type: 'CARD' },
+  requisiteAlert: { value: '2202301145127431', type: 'CARD' },
 };
 
 const cleanPanelState: PanelState = {
@@ -495,6 +507,8 @@ const settings: Settings = {
   panelPlacement: 'chat-bottom',
   panelWidth: 384,
   panelHeight: 340,
+  chatWidth: 0,
+  chatHeight: 0,
   templateMode: 'insert',
 };
 

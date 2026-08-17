@@ -277,9 +277,10 @@ check(
 check('досье: автор замаскирован', dossier.reviews?.[0]?.author?.includes('•••'), dossier.reviews?.[0]);
 check('досье: ЧС команды виден', dossier.blacklist?.length === 1, dossier.blacklist);
 check('досье: заметка команды на месте', !!dossier.teamNote?.text, dossier.teamNote);
+// трейдер должен сверить номер с тем, что прислали в чат, поэтому целиком
 check(
-  'досье: реквизиты с маской',
-  dossier.requisites?.some((r) => r.mask.includes('•')),
+  'досье: реквизит виден целиком, без звёздочек',
+  dossier.requisites?.some((r) => r.value === '4276380012345679'),
   dossier.requisites,
 );
 check('досье: риск стал критическим', dossier.risk?.level === 'CRITICAL', dossier.risk);
@@ -430,8 +431,14 @@ check(
 check(
   'наши отзывы и биржевые не смешиваются',
   Array.isArray(withoutExchangeReviews.json.reviews) &&
-    withoutExchangeReviews.json.reviews.every((r) => r.author?.startsWith('P2P Guard')),
+    withoutExchangeReviews.json.reviews.every((r) => r.author?.includes('P2P Guard')),
   withoutExchangeReviews.json.reviews?.slice(0, 2),
+);
+
+check(
+  'в отзыве подписано, что UID биржевой',
+  withoutExchangeReviews.json.reviews?.[0]?.author?.includes('UID Binance'),
+  withoutExchangeReviews.json.reviews?.[0]?.author,
 );
 
 // ───────────────────────────── Теги жалоб ─────────────────────────────

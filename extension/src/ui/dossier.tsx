@@ -48,8 +48,8 @@ export type DossierActions = {
   isAdmin: boolean;
   hasTeam: boolean;
   // вставка шаблона в чат биржи, есть только в панели ордера
-  // возвращает false, если поле ввода на странице не нашлось
-  onUseTemplate?: (body: string) => boolean;
+  // null означает, что поле ввода на странице не нашлось
+  onUseTemplate?: (body: string) => 'inserted' | 'sent' | null;
 };
 
 // ───────────────────────────── Мелочи ─────────────────────────────
@@ -140,7 +140,10 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="nick">{counterparty.nickname ?? 'Без ника'}</div>
           <div className="meta-row">
-            <span className="uid">UID {counterparty.externalId}</span>
+            {/* явно подписываем: UID здесь биржевой, внутренний ID ниже */}
+            <span className="uid">
+              UID Binance <b className="mono">{counterparty.externalId}</b>
+            </span>
             {counterparty.countryCode ? <span className="badge">{counterparty.countryCode}</span> : null}
           </div>
           {counterparty.maskedPhone ? <div className="uid">{counterparty.maskedPhone}</div> : null}
@@ -165,7 +168,8 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
       </div>
 
       <div className="hint" style={{ marginTop: 8 }}>
-        Впервые в базе: {fmtDate(counterparty.firstSeenAt)}
+        Впервые в базе: {fmtDate(counterparty.firstSeenAt)} · внутренний ID P2P Guard{' '}
+        <span className="mono">{counterparty.id}</span>
       </div>
     </div>
   );
@@ -324,20 +328,53 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
             <span className="stat-v">{fmtNumber(s.feedbackCount)}</span>
           </div>
         </div>
+
+        <div className="stat">
+          <div className="stat-name">Оборот</div>
+          <div className="stat-pair">
+            <span className="stat-k">Всего</span>
+            <span className="stat-v">{fmtMoney(s.totalVolumeFiat)}</span>
+          </div>
+          <div className="stat-pair">
+            <span className="stat-k">30 дней</span>
+            <span className="stat-v">{fmtMoney(s.volume30dFiat)}</span>
+          </div>
+        </div>
+
+        <div className={`stat ${s.blockedBy ? 'flag' : ''}`}>
+          <div className="stat-name">Репутация</div>
+          <div className="stat-pair">
+            <span className="stat-k">Заблокировали</span>
+            <span className="stat-v">{fmtNumber(s.blockedBy)}</span>
+          </div>
+          <div className="stat-pair">
+            <span className="stat-k">Подписчиков</span>
+            <span className="stat-v">{fmtNumber(s.followers)}</span>
+          </div>
+        </div>
       </div>
 
-      {verifications.length ? (
-        <div className="verify">
-          {verifications.map(([label, ok]) => (
-            <span key={label} className={`badge ${ok ? 'ok' : 'bad'}`}>
-              {ok ? '✓' : '✕'} {label}
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <div className="verify">
+        <span className={`badge ${s.kycCountry ? 'accent' : ''}`} title={COUNTRY_HINT[s.kycCountrySource ?? 'none']}>
+          Страна: {s.kycCountry ?? 'неизвестна'}
+          {s.kycCountrySource === 'phone' ? ' (по телефону)' : ''}
+        </span>
+        {s.merchantLevel ? <span className="badge">{s.merchantLevel}</span> : null}
+        {verifications.map(([label, ok]) => (
+          <span key={label} className={`badge ${ok ? 'ok' : 'bad'}`}>
+            {ok ? '✓' : '✕'} {label}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
+
+const COUNTRY_HINT: Record<string, string> = {
+  exchange: 'Страна подтверждения аккаунта по данным Binance',
+  phone: 'Определена по международному коду телефона контрагента, а не подтверждена биржей',
+  none: 'Binance не отдала страну, а телефон не распознан',
+};
 
 // отзывы самой биржи, отдельным блоком
 export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
@@ -504,7 +541,7 @@ export function RequisitesCard({ dossier }: { dossier: Dossier }) {
         dossier.requisites.map((r) => (
           <div className="req-row" key={r.id}>
             {r.type === 'CARD' ? <IconCard size={15} /> : <IconPhone size={15} />}
-            <span className="req-mask">{r.mask}</span>
+            <span className="req-mask mono">{r.value}</span>
             {r.blacklisted ? (
               <span className="badge bad" title={`Замечен также у: ${r.alsoUsedBy.join(', ')}`}>
                 <IconBan size={12} /> в ЧС
@@ -832,7 +869,7 @@ export function TemplatesCard({
   onUse,
 }: {
   templates: { id: string; title: string; body: string }[];
-  onUse?: (body: string) => boolean;
+  onUse?: (body: string) => 'inserted' | 'sent' | null;
 }) {
   const [done, setDone] = useState<{ id: string; label: string } | null>(null);
   if (!templates.length) return null;
@@ -840,8 +877,11 @@ export function TemplatesCard({
   const use = async (id: string, body: string) => {
     // в ордере пишем прямо в поле чата, вне его остаётся буфер обмена
     if (onUse) {
-      const ok = onUse(body);
-      setDone({ id, label: ok ? 'вставлено' : 'поле чата не найдено' });
+      const result = onUse(body);
+      setDone({
+        id,
+        label: result === 'sent' ? 'отправлено' : result === 'inserted' ? 'вставлено' : 'поле чата не найдено',
+      });
     } else {
       try {
         await navigator.clipboard.writeText(body);
@@ -871,7 +911,10 @@ export function TemplatesCard({
         ))}
       </div>
       <div className="hint" style={{ marginTop: 6 }}>
-        <IconClock size={11} /> Клик копирует текст в буфер обмена
+        <IconClock size={11} />{' '}
+        {onUse
+          ? 'Клик подставляет текст в чат Binance — режим настраивается в расширении'
+          : 'Клик копирует текст в буфер обмена'}
       </div>
     </div>
   );

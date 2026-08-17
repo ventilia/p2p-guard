@@ -124,7 +124,11 @@ export function Panel() {
       return undefined;
     }
     return watchLayout(() => {
-      const layout = computeLayout(settings.panelPlacement, settings.panelWidth, settings.panelHeight);
+      const layout = computeLayout(
+        settings.panelPlacement,
+        { width: settings.panelWidth, height: settings.panelHeight },
+        { width: settings.chatWidth, height: settings.chatHeight },
+      );
       // сравниваем по значению: иначе каждый кадр давал бы новый рендер
       setBox((prev) =>
         prev &&
@@ -136,7 +140,14 @@ export function Panel() {
           : layout.box,
       );
     });
-  }, [active, settings.panelPlacement, settings.panelWidth, settings.panelHeight]);
+  }, [
+    active,
+    settings.panelPlacement,
+    settings.panelWidth,
+    settings.panelHeight,
+    settings.chatWidth,
+    settings.chatHeight,
+  ]);
 
   // перетаскивание за шапку
   useEffect(() => {
@@ -218,7 +229,11 @@ export function Panel() {
         scope,
       }),
     onRevokeBlacklist: (entryId) => void run({ type: 'REVOKE_BLACKLIST', entryId }),
-    onUseTemplate: (text) => insertIntoChat(text, settings.templateMode === 'send'),
+    onUseTemplate: (text) => {
+      const send = settings.templateMode === 'send';
+      if (!insertIntoChat(text, send)) return null;
+      return send ? 'sent' : 'inserted';
+    },
   };
 
   return (
@@ -291,7 +306,7 @@ export function Panel() {
           <div className="alert">
             <IconAlert size={15} />
             <span>
-              В чате появился новый реквизит <b>{ready.requisiteAlert.mask}</b>. Платите только по
+              В чате появился новый реквизит <b>{ready.requisiteAlert.value}</b>. Платите только по
               данным из ордера.
             </span>
           </div>

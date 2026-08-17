@@ -219,7 +219,12 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 .seg button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
 
 .range { display: block; margin-top: 10px; font-size: 11.5px; color: var(--muted); }
-.range span { display: flex; justify-content: space-between; margin-bottom: 5px; }
+.range > span { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+.range b { display: inline-flex; align-items: baseline; gap: 7px; color: var(--text-2); }
+.range .link {
+  border: 0; background: none; padding: 0; cursor: pointer;
+  color: var(--accent); font-size: 10.5px; font-family: inherit;
+}
 .range input[type=range] {
   width: 100%; height: 3px; appearance: none;
   background: var(--line-strong); cursor: pointer;

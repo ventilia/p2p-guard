@@ -25,6 +25,11 @@ const CSS = `
   border: 1px solid #2B3139; background: #1E2329; color: #EAECEF;
   padding: 6px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
 }
+#pg-demo-order .ctl {
+  display: flex; align-items: center; gap: 6px;
+  color: #848E9C; font-size: 11px; white-space: nowrap;
+}
+#pg-demo-order .ctl input { width: 90px; accent-color: #FCD535; }
 
 #pg-demo-order .body { display: flex; height: calc(100vh - 64px); }
 #pg-demo-order .order-col {
@@ -112,11 +117,12 @@ const HTML = `
   <span class="logo">◆ BINANCE</span>
   <a>Купить криптовалюту</a><a>Рынки</a><a>Торговля</a><a>P2P</a>
   <span class="spacer"></span>
-  <span style="color:#848E9C;font-size:12px">Панель:</span>
+  <label class="ctl">Ширина чата<input type="range" id="pg-w" min="280" max="720" step="8" value="0"></label>
+  <label class="ctl">Высота чата<input type="range" id="pg-h" min="220" max="900" step="20" value="0"></label>
   <button class="close" data-place="chat-bottom">Под чатом</button>
   <button class="close" data-place="chat-left">Слева от чата</button>
   <button class="close" data-place="floating">Свободно</button>
-  <button class="close" id="pg-demo-close">Закрыть демо-ордер</button>
+  <button class="close" id="pg-demo-close">Закрыть</button>
 </div>
 
 <div class="body">
@@ -194,6 +200,7 @@ export function isOrderPageOpen(): boolean {
 export function openOrderPage(
   onClose: () => void,
   onPlacement: (value: 'chat-bottom' | 'chat-left' | 'floating') => void,
+  onChatSize: (patch: { chatWidth?: number; chatHeight?: number }) => void,
 ): void {
   if (host) return;
   onCloseHook = onClose;
@@ -217,6 +224,13 @@ export function openOrderPage(
       onPlacement(button.dataset.place as 'chat-bottom' | 'chat-left' | 'floating');
     });
   }
+
+  host.querySelector('#pg-w')?.addEventListener('input', (e) => {
+    onChatSize({ chatWidth: Number((e.target as HTMLInputElement).value) });
+  });
+  host.querySelector('#pg-h')?.addEventListener('input', (e) => {
+    onChatSize({ chatHeight: Number((e.target as HTMLInputElement).value) });
+  });
 }
 
 export function closeOrderPage(): void {

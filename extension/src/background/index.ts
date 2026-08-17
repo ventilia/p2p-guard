@@ -22,7 +22,7 @@ import {
   type OrderContext,
 } from './orderContext.js';
 import type { RuntimeRequest, RuntimeResponse } from '../shared/messages.js';
-import { extractRequisites, maskRequisite } from '../shared/parse.js';
+import { extractRequisites } from '../shared/parse.js';
 import {
   getLastOrderSync,
   getSession,
@@ -409,18 +409,17 @@ async function handleChatPayload(tabId: number, payload: unknown): Promise<void>
     const state = await getPanelState(tabId);
     if (state.status !== 'ready') return;
 
-    const known = new Set(state.dossier.requisites.map((r) => r.mask));
+    const known = new Set(state.dossier.requisites.map((r) => r.value));
     const firstItem = fresh[0];
     if (!firstItem) return;
 
-    const mask = maskRequisite(firstItem.value);
-    const isNew = !known.has(mask);
+    const isNew = !known.has(firstItem.value);
 
     const dossier = await apiRequest<Dossier>(`/counterparties/${counterpartyId}/dossier`);
     await setPanelState(tabId, {
       ...state,
       dossier,
-      requisiteAlert: isNew ? { mask, type: firstItem.type as RequisiteType } : null,
+      requisiteAlert: isNew ? { value: firstItem.value, type: firstItem.type as RequisiteType } : null,
     });
   } catch (err) {
     console.warn('[P2P Guard] не удалось сохранить реквизиты', err);

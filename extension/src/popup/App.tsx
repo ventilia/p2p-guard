@@ -1147,6 +1147,55 @@ function TemplatesTab({ onError, onNotice }: { onError: (m: string) => void; onN
 
 // ───────────────────────────── Настройки ─────────────────────────────
 
+/**
+ * Ползунок размера. У размеров чата есть особое значение 0 — «не трогать
+ * вёрстку биржи»; показываем его словом, а не нулём, иначе непонятно, что
+ * произойдёт.
+ */
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  auto,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  auto?: string;
+  onChange: (value: number) => void;
+}) {
+  const isAuto = auto !== undefined && value <= 0;
+
+  return (
+    <div className="range">
+      <span>
+        {label}
+        <b className="mono">
+          {isAuto ? auto : `${value} px`}
+          {auto !== undefined && !isAuto ? (
+            <button className="link" onClick={() => onChange(0)}>
+              сбросить
+            </button>
+          ) : null}
+        </b>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={isAuto ? min : value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </div>
+  );
+}
+
 function SettingsTab({
   session,
   settings,
@@ -1296,35 +1345,53 @@ function SettingsTab({
           перекрывая
         </div>
 
-        <label className="range">
-          <span>
-            Высота панели <b className="mono">{settings?.panelHeight ?? 340} px</b>
-          </span>
-          <input
-            type="range"
-            min={200}
-            max={640}
-            step={20}
-            value={settings?.panelHeight ?? 340}
-            onChange={(e) => void onSettings({ panelHeight: Number(e.target.value) })}
-          />
-        </label>
+        <Slider
+          label="Ширина чата"
+          value={settings?.chatWidth ?? 0}
+          min={280}
+          max={720}
+          step={8}
+          auto="как у Binance"
+          onChange={(chatWidth) => void onSettings({ chatWidth })}
+        />
 
-        {settings?.panelPlacement !== 'chat-bottom' ? (
-          <label className="range">
-            <span>
-              Ширина панели <b className="mono">{settings?.panelWidth ?? 384} px</b>
-            </span>
-            <input
-              type="range"
-              min={280}
-              max={560}
-              step={8}
-              value={settings?.panelWidth ?? 384}
-              onChange={(e) => void onSettings({ panelWidth: Number(e.target.value) })}
-            />
-          </label>
+        <Slider
+          label="Высота чата"
+          value={settings?.chatHeight ?? 0}
+          min={220}
+          max={900}
+          step={20}
+          auto="по высоте панели"
+          onChange={(chatHeight) => void onSettings({ chatHeight })}
+        />
+
+        <Slider
+          label="Высота панели"
+          value={settings?.panelHeight ?? 340}
+          min={200}
+          max={720}
+          step={20}
+          onChange={(panelHeight) => void onSettings({ panelHeight })}
+        />
+
+        {settings?.panelPlacement === 'chat-left' ? (
+          <Slider
+            label="Ширина панели"
+            value={settings?.panelWidth ?? 384}
+            min={280}
+            max={560}
+            step={8}
+            onChange={(panelWidth) => void onSettings({ panelWidth })}
+          />
         ) : null}
+
+        <button
+          className="btn ghost block"
+          style={{ marginTop: 10 }}
+          onClick={() => void onSettings({ chatWidth: 0, chatHeight: 0, panelHeight: 340, panelWidth: 384 })}
+        >
+          Сбросить размеры
+        </button>
       </div>
 
       <div className="card">

@@ -38,6 +38,9 @@ export type Settings = {
   panelPlacement: PanelPlacement;
   panelWidth: number;
   panelHeight: number;
+  // 0 — не трогать столбец чата, иначе задаём его размер сами
+  chatWidth: number;
+  chatHeight: number;
   templateMode: TemplateMode;
 };
 
@@ -66,6 +69,12 @@ export type ExchangeStats = {
   feedbackCount?: number | null;
   followers?: number | null;
   blockedBy?: number | null;
+  // страна подтверждения аккаунта, ISO: RU, KZ, AZE
+  kycCountry?: string | null;
+  // как узнали страну: подтверждение биржи или код телефона
+  kycCountrySource?: 'exchange' | 'phone' | null;
+  totalVolumeFiat?: number | null;
+  volume30dFiat?: number | null;
 };
 
 // отзыв, оставленный на самой бирже
@@ -199,7 +208,7 @@ export type Dossier = {
   requisites: {
     id: string;
     type: RequisiteType;
-    mask: string;
+    value: string;
     timesSeen: number;
     lastSeenAt: string;
     blacklisted: boolean;
@@ -236,5 +245,5 @@ export type PanelState =
       role: 'USER' | 'TEAM_LEAD' | 'ADMIN';
       hasTeam: boolean;
       // реквизиты, замеченные в чате после открытия карточки
-      requisiteAlert?: { mask: string; type: RequisiteType } | null;
+      requisiteAlert?: { value: string; type: RequisiteType } | null;
     };
