@@ -89,6 +89,8 @@ export async function buildDossier(
     ownRows,
     recentOrders,
     reqLinks,
+    ownVolume,
+    ownVolume30d,
   ] = await Promise.all([
       prisma.blacklistEntry.findMany({
         where: {
@@ -161,6 +163,23 @@ export async function buildDossier(
         take: 30,
         include: { requisite: true },
       }),
+
+      // средний чек по нашей базе: подстраховка, когда биржа статистику не отдала
+      prisma.order.aggregate({
+        where: { counterpartyId: counterparty.id, status: 'COMPLETED' },
+        _avg: { amountFiat: true },
+        _count: { _all: true },
+      }),
+
+      prisma.order.aggregate({
+        where: {
+          counterpartyId: counterparty.id,
+          status: 'COMPLETED',
+          createdAtExchange: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        },
+        _avg: { amountFiat: true },
+        _count: { _all: true },
+      }),
     ]);
 
   // реквизит «грязный», если засветился у другого контрагента из глобального ЧС
@@ -200,7 +219,28 @@ export async function buildDossier(
     reviewTagRows.map((r) => [r.tag, r._count._all]),
   ) as Partial<Record<ReviewTag, number>>;
 
-  const stats = (counterparty.exchangeStats ?? {}) as ExchangeStatsSnapshot;
+  const stored = (counterparty.exchangeStats ?? {}) as ExchangeStatsSnapshot;
+
+  // биржа отдаёт статистику не всегда, поэтому недостающее считаем по своей базе
+  // и помечаем источник, чтобы карточка не выдавала наши цифры за биржевые
+  const fallbackAvg = ownVolume._avg.amountFiat ? Math.round(Number(ownVolume._avg.amountFiat)) : null;
+  const fallbackAvg30d = ownVolume30d._avg.amountFiat
+    ? Math.round(Number(ownVolume30d._avg.amountFiat))
+    : null;
+
+  const stats: ExchangeStatsSnapshot = {
+    ...stored,
+    avgAmountFiat: stored.avgAmountFiat ?? fallbackAvg,
+    avgAmount30dFiat: stored.avgAmount30dFiat ?? fallbackAvg30d,
+  };
+
+  const statsSource = {
+    avgAmountFiat: stored.avgAmountFiat != null ? 'exchange' : fallbackAvg != null ? 'local' : 'none',
+    avgAmount30dFiat:
+      stored.avgAmount30dFiat != null ? 'exchange' : fallbackAvg30d != null ? 'local' : 'none',
+    // всё остальное приходит только с биржи
+    exchange: Object.keys(stored).length > 0,
+  } as const;
 
   const market = summarize(marketCounts);
   const team = summarize(teamCounts);
@@ -243,6 +283,8 @@ export async function buildDossier(
     },
     risk,
     exchangeStats: stats,
+    statsSource,
+    statsUpdatedAt: counterparty.statsUpdatedAt,
     blacklist: blacklist.map((b) => ({
       id: b.id,
       scope: b.scope,
@@ -309,16 +351,53 @@ export async function buildDossier(
 
 export type Dossier = Awaited<ReturnType<typeof buildDossier>>;
 
-// upsert контрагента с мягким обновлением снимка статистики
+/**
+ * Слияние снимков статистики.
+ *
+ * Заменять снимок целиком нельзя: расширение присылает то, что смогло достать
+ * на этот раз, и после перезагрузки страницы перехват может не сработать. Тогда
+ * полный профиль затирался бы огрызком, данные пропадали, а риск-скор
+ * пересчитывался по обеднённым цифрам.
+ */
+function mergeStats(
+  previous: ExchangeStatsSnapshot | null,
+  incoming: ExchangeStatsSnapshot | undefined,
+): { changed: boolean; value: ExchangeStatsSnapshot } {
+  const base: ExchangeStatsSnapshot = { ...(previous ?? {}) };
+  if (!incoming) return { changed: false, value: base };
+
+  let changed = false;
+  for (const [key, value] of Object.entries(incoming)) {
+    // null и undefined означают «не смогли узнать», а не «стало пусто»
+    if (value === null || value === undefined) continue;
+    if (base[key as keyof ExchangeStatsSnapshot] === value) continue;
+    (base as Record<string, unknown>)[key] = value;
+    changed = true;
+  }
+  return { changed, value: base };
+}
+
 export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
   const now = new Date();
+
+  const existing = await prisma.counterparty.findUnique({
+    where: { exchange_externalId: { exchange: input.exchange, externalId: input.externalId } },
+    select: { exchangeStats: true },
+  });
+
+  const stats = mergeStats(
+    (existing?.exchangeStats ?? null) as ExchangeStatsSnapshot | null,
+    input.stats,
+  );
+
   const base = {
     nickname: input.nickname ?? undefined,
     countryCode: input.countryCode ?? undefined,
     maskedPhone: input.maskedPhone ?? undefined,
     lastSeenAt: now,
-    ...(input.stats
-      ? { exchangeStats: input.stats as Prisma.InputJsonValue, statsUpdatedAt: now }
+    // время обновления двигаем только когда что-то реально узнали новое
+    ...(stats.changed
+      ? { exchangeStats: stats.value as Prisma.InputJsonValue, statsUpdatedAt: now }
       : {}),
   };
 
@@ -330,6 +409,7 @@ export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
       exchange: input.exchange,
       externalId: input.externalId,
       ...base,
+      ...(input.stats ? { exchangeStats: stats.value as Prisma.InputJsonValue, statsUpdatedAt: now } : {}),
     },
     update: base,
   });

@@ -326,6 +326,73 @@ check(
   foreignDossier.reviews?.length,
 );
 
+// ─────────────────── Статистика биржи не должна теряться ───────────────────
+
+section('Сохранность статистики');
+
+// повторный lookup без stats: полный снимок обязан уцелеть
+const withoutStats = await call('/counterparties/lookup', {
+  method: 'POST',
+  ...T,
+  body: { externalId: cpUid },
+});
+check(
+  'снимок биржи пережил вызов без статистики',
+  withoutStats.json.exchangeStats?.registeredDays === 12 &&
+    withoutStats.json.exchangeStats?.completionRate === 0.82,
+  withoutStats.json.exchangeStats,
+);
+
+// частичный снимок дополняет, а не затирает
+const partial = await call('/counterparties/lookup', {
+  method: 'POST',
+  ...T,
+  body: { externalId: cpUid, stats: { orders30d: 7, completionRate: null } },
+});
+check(
+  'частичный снимок дополнил, а не затёр',
+  partial.json.exchangeStats?.orders30d === 7 &&
+    partial.json.exchangeStats?.registeredDays === 12 &&
+    partial.json.exchangeStats?.completionRate === 0.82,
+  partial.json.exchangeStats,
+);
+
+check(
+  'средний чек с биржи помечен как биржевой',
+  partial.json.statsSource?.avgAmountFiat === 'exchange',
+  partial.json.statsSource,
+);
+
+// контрагент, по которому биржа не дала ничего: чек берём из своих сделок
+// ордер вешаем на второго трейдера, чтобы не сдвинуть статистику первого,
+// которую проверяет админский раздел ниже
+const bareUid = `cp-bare-${run}`;
+await call('/counterparties/lookup', {
+  method: 'POST',
+  ...O,
+  body: {
+    externalId: bareUid,
+    order: {
+      externalId: `${orderNo}-bare`,
+      side: 'BUY',
+      status: 'COMPLETED',
+      fiat: 'RUB',
+      amountFiat: 64000,
+      createdAtExchange: new Date().toISOString(),
+    },
+  },
+});
+const bare = await call('/counterparties/lookup', {
+  method: 'POST',
+  ...O,
+  body: { externalId: bareUid },
+});
+check(
+  'без данных биржи средний чек считается по нашей базе',
+  bare.json.exchangeStats?.avgAmountFiat === 64000 && bare.json.statsSource?.avgAmountFiat === 'local',
+  { avg: bare.json.exchangeStats?.avgAmountFiat, src: bare.json.statsSource },
+);
+
 // ───────────────────────────── Теги жалоб ─────────────────────────────
 
 section('Категории жалоб');

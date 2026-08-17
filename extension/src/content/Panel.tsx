@@ -9,6 +9,7 @@ import {
   IconSun,
 } from '../shared/icons.js';
 import { DossierView, type DossierActions } from '../ui/dossier.js';
+import { insertIntoChat } from './chatInput.js';
 import type { PanelState, Settings } from '../shared/types.js';
 
 // единая точка вызова background с обработкой ответа-состояния
@@ -180,6 +181,7 @@ export function Panel() {
         scope,
       }),
     onRevokeBlacklist: (entryId) => void run({ type: 'REVOKE_BLACKLIST', entryId }),
+    onUseTemplate: insertIntoChat,
   };
 
   return (

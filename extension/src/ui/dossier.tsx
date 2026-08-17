@@ -47,6 +47,9 @@ export type DossierActions = {
   onRevokeBlacklist: (id: string) => void;
   isAdmin: boolean;
   hasTeam: boolean;
+  // вставка шаблона в чат биржи, есть только в панели ордера
+  // возвращает false, если поле ввода на странице не нашлось
+  onUseTemplate?: (body: string) => boolean;
 };
 
 // ───────────────────────────── Мелочи ─────────────────────────────
@@ -757,18 +760,31 @@ export function ReviewsCard({ dossier, actions }: { dossier: Dossier; actions: D
 
 // ───────────────────────────── Быстрые ответы ─────────────────────────────
 
-export function TemplatesCard({ templates }: { templates: { id: string; title: string; body: string }[] }) {
-  const [copied, setCopied] = useState<string | null>(null);
+export function TemplatesCard({
+  templates,
+  onUse,
+}: {
+  templates: { id: string; title: string; body: string }[];
+  onUse?: (body: string) => boolean;
+}) {
+  const [done, setDone] = useState<{ id: string; label: string } | null>(null);
   if (!templates.length) return null;
 
-  const copy = async (id: string, body: string) => {
-    try {
-      await navigator.clipboard.writeText(body);
-      setCopied(id);
-      setTimeout(() => setCopied(null), 1200);
-    } catch {
-      setCopied(null);
+  const use = async (id: string, body: string) => {
+    // в ордере пишем прямо в поле чата, вне его остаётся буфер обмена
+    if (onUse) {
+      const ok = onUse(body);
+      setDone({ id, label: ok ? 'вставлено' : 'поле чата не найдено' });
+    } else {
+      try {
+        await navigator.clipboard.writeText(body);
+        setDone({ id, label: 'скопировано' });
+      } catch {
+        setDone(null);
+        return;
+      }
     }
+    setTimeout(() => setDone(null), 1600);
   };
 
   return (
@@ -776,10 +792,10 @@ export function TemplatesCard({ templates }: { templates: { id: string; title: s
       <div className="card-title">Быстрые ответы</div>
       <div className="templates">
         {templates.map((t) => (
-          <button key={t.id} className="template-chip" onClick={() => void copy(t.id, t.body)}>
-            {copied === t.id ? (
+          <button key={t.id} className="template-chip" onClick={() => void use(t.id, t.body)}>
+            {done?.id === t.id ? (
               <>
-                <IconCheck size={12} /> скопировано
+                <IconCheck size={12} /> {done.label}
               </>
             ) : (
               t.title
@@ -817,7 +833,7 @@ export function DossierView({
       <OrdersCard dossier={dossier} />
       <RequisitesCard dossier={dossier} />
       <BlacklistForm dossier={dossier} actions={actions} />
-      {templates?.length ? <TemplatesCard templates={templates} /> : null}
+      {templates?.length ? <TemplatesCard templates={templates} onUse={actions.onUseTemplate} /> : null}
     </>
   );
 }
