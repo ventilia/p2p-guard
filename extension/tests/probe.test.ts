@@ -1,10 +1,9 @@
 /**
  * Прогон scripts/probe-binance.js в подставном окружении.
  *
- * Этот скрипт — единственное, чем можно узнать форму ответов биржи, и запускают
- * его вручную в чужой консоли, где отладки не будет. Поэтому проверяем его
- * целиком: находит ли контрагента, те ли шлёт заголовки, не путает ли пустой
- * ответ с рабочим и не утаскивает ли в отчёт куки.
+ * Скрипт запускают вручную в чужой консоли, где отладки не будет, поэтому
+ * проверяем его целиком. Главное здесь — сообщение биржи при 400: путь
+ * существует, но параметры не те, и подобрать их можно только по её ответу.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
@@ -16,59 +15,42 @@ import vm from 'node:vm';
 const here = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(resolve(here, '../scripts/probe-binance.js'), 'utf8');
 
-type Call = { path: string; method: string; headers: Record<string, string>; body?: string };
+const PROFILE = '/bapi/c2c/v2/friendly/c2c/user/profile-and-ads-list';
+
+type Attempt = {
+  label: string;
+  status: number;
+  code: string | null;
+  message: string | null;
+  good: boolean;
+  body: Record<string, unknown> | null;
+  data: Record<string, any> | null;
+};
 
 type Report = {
   userNo: string;
-  loggedIn: boolean;
-  working: { method: string; path: string }[];
-  results: { path: string; response: Record<string, any> }[];
+  tries: Attempt[];
   pathsPageUsedItself: string[];
 };
 
-const PROFILE = '/bapi/c2c/v2/friendly/c2c/user/profile-and-ads-list';
-const FEEDBACK_V1 = '/bapi/c2c/v1/friendly/c2c/user/feedback/list';
-const FEEDBACK_V2 = '/bapi/c2c/v2/friendly/c2c/user/feedback/list';
+type Call = { path: string; body: Record<string, unknown> | null; headers: Record<string, string> };
 
-// один путь отдаёт профиль, один — отзывы, один отвечает успехом но пустотой
-const RESPONSES: Record<string, unknown> = {
-  [PROFILE]: {
-    success: true,
-    data: {
-      userDetailVo: {
-        userNo: 's1e7e25dcd7b43cfaad5f417fecc658f9',
-        nickName: 'Jasik_2024',
-        countryCode: 'KZ',
-        csrfToken: 'секрет-не-должен-попасть-в-отчёт',
-        userStatsRet: { completedOrderNum: 637, monthFinishRate: 99.3 },
-      },
-    },
-  },
-  [FEEDBACK_V1]: {
-    success: true,
-    data: [{ appraiseType: 0, content: 'Тянул два часа', authorNickName: 'trader_kz' }],
-  },
-  [FEEDBACK_V2]: { success: true, data: [] },
-};
-
-async function run(overrides: { href?: string; cookie?: string } = {}) {
+/**
+ * @param accept тело, на которое подставная биржа отвечает успехом;
+ *               остальным она отдаёт 400 с объяснением, как настоящая
+ */
+async function run(accept?: (body: Record<string, unknown>) => boolean) {
   const calls: Call[] = [];
 
   const sandbox: Record<string, unknown> = {
-    console: { log: () => undefined },
+    console: { log: () => undefined, table: () => undefined },
     location: {
       hostname: 'c2c.binance.com',
       origin: 'https://c2c.binance.com',
-      pathname: '/ru/advertiserDetail',
-      href:
-        overrides.href ??
-        'https://c2c.binance.com/ru/advertiserDetail?advertiserNo=s1e7e25dcd7b43cfaad5f417fecc658f9',
+      href: 'https://c2c.binance.com/ru/advertiserDetail?advertiserNo=sc424767c736735d9af156d1965971886',
     },
     document: {
-      cookie:
-        overrides.cookie ??
-        'lang=ru; csrftoken=SECRET_CSRF; bnc-uuid=UUID-1; BNC_FV_KEY=FVKEY-1; logined=y',
-      querySelectorAll: () => [],
+      cookie: 'lang=ru; csrftoken=SECRET_CSRF; bnc-uuid=UUID-1; BNC_FV_KEY=FVKEY-1',
       body: { innerHTML: '' },
       createElement: () => ({ style: {}, select() {}, remove() {} }),
       execCommand: () => true,
@@ -76,6 +58,7 @@ async function run(overrides: { href?: string; cookie?: string } = {}) {
     performance: {
       getEntriesByType: () => [
         { name: 'https://c2c.binance.com/bapi/c2c/v1/private/c2c/chat/ping-by-type' },
+        { name: 'https://c2c.binance.com/bapi/c2c/v2/friendly/c2c/user/detail?userNo=abc&lang=ru' },
         { name: 'https://c2c.binance.com/static/img.png' },
       ],
     },
@@ -90,13 +73,32 @@ async function run(overrides: { href?: string; cookie?: string } = {}) {
     Set,
     Error,
     Promise,
-    fetch: async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
-      const path = new URL(url).pathname;
-      calls.push({ path, method: init.method, headers: init.headers, body: init.body });
-      const hit = RESPONSES[path];
-      return hit
-        ? { status: 200, text: async () => JSON.stringify(hit) }
-        : { status: 404, text: async () => JSON.stringify({ success: false, code: '404' }) };
+    fetch: async (url: string, init: { headers: Record<string, string>; body?: string }) => {
+      const body = init.body ? JSON.parse(init.body) : null;
+      calls.push({ path: new URL(url).pathname, body, headers: init.headers });
+
+      if (accept && body && accept(body)) {
+        return {
+          status: 200,
+          text: async () =>
+            JSON.stringify({
+              success: true,
+              data: {
+                userDetailVo: {
+                  userNo: 'sc424767c736735d9af156d1965971886',
+                  nickName: 'Jasik_2024',
+                  csrfToken: 'секрет',
+                  userStatsRet: { completedOrderNum: 637 },
+                },
+              },
+            }),
+        };
+      }
+      return {
+        status: 400,
+        text: async () =>
+          JSON.stringify({ success: false, code: '000002', message: 'Illegal parameter: tradeType' }),
+      };
     },
   };
   sandbox.globalThis = sandbox;
@@ -106,55 +108,68 @@ async function run(overrides: { href?: string; cookie?: string } = {}) {
 }
 
 describe('probe-binance.js', () => {
-  it('находит контрагента в адресе страницы', async () => {
+  it('находит контрагента в адресе профиля', async () => {
     const { report } = await run();
-    assert.equal(report.userNo, 's1e7e25dcd7b43cfaad5f417fecc658f9');
-    assert.equal(report.loggedIn, true);
+    assert.equal(report.userNo, 'sc424767c736735d9af156d1965971886');
   });
 
-  it('рабочим считает только путь, вернувший данные', async () => {
-    const { report } = await run();
-    const paths = report.working.map((w) => w.path);
+  it('перебирает варианты тела по одному и тому же пути', async () => {
+    const { report, calls } = await run();
 
-    assert.ok(paths.includes(PROFILE), `нет профиля: ${paths}`);
-    assert.ok(paths.includes(FEEDBACK_V1), `нет отзывов: ${paths}`);
-    // успех с пустым списком — это не рабочий путь, иначе я пойду чинить не то
-    assert.ok(!paths.includes(FEEDBACK_V2), `пустой ответ попал в рабочие: ${paths}`);
+    assert.ok(report.tries.length >= 6, `вариантов всего ${report.tries.length}`);
+    assert.ok(calls.every((c) => c.path === PROFILE), 'все запросы идут в найденный путь');
+    // пустое тело идёт первым: по жалобе на него видно, какое поле обязательно
+    // объект пришёл из песочницы, поэтому сверяем содержимое, а не прототип
+    assert.equal(Object.keys(report.tries[0]!.body!).length, 0);
+  });
+
+  it('показывает, чем именно биржа недовольна', async () => {
+    const { report } = await run();
+
+    assert.ok(report.tries.every((t) => t.status === 400));
+    assert.equal(report.tries[0]!.code, '000002');
+    assert.equal(report.tries[0]!.message, 'Illegal parameter: tradeType');
+    assert.ok(report.tries.every((t) => !t.good));
+  });
+
+  it('узнаёт подошедший вариант и сохраняет его ответ', async () => {
+    const { report } = await run((b) => b.tradeType === 'BUY' && b.asset === 'USDT');
+
+    const winner = report.tries.filter((t) => t.good);
+    assert.ok(winner.length >= 1, 'ни один вариант не признан рабочим');
+    assert.equal(winner[0]!.data!.userDetailVo.userStatsRet.completedOrderNum, 637);
+    // тело победителя нужно, чтобы повторить запрос из расширения
+    assert.equal(winner[0]!.body!.asset, 'USDT');
   });
 
   it('шлёт заголовки, которые биржа ждёт от своей же страницы', async () => {
     const { calls } = await run();
-    const headers = calls[0]!.headers;
+    const h = calls[0]!.headers;
 
-    assert.equal(headers.csrftoken, 'SECRET_CSRF');
-    assert.equal(headers.c2ctype, 'c2c_web');
-    assert.equal(headers.clienttype, 'web');
-    assert.equal(headers['fvideo-id'], 'FVKEY-1');
-    assert.ok(calls[0]!.body?.includes('s1e7e25'), 'номер контрагента ушёл в теле запроса');
+    assert.equal(h.csrftoken, 'SECRET_CSRF');
+    assert.equal(h.c2ctype, 'c2c_web');
+    assert.equal(h.clienttype, 'web');
+    assert.equal(h['fvideo-id'], 'FVKEY-1');
   });
 
-  it('сохраняет цифры, но вырезает секреты', async () => {
-    const { report } = await run();
-    const profile = report.results.find((r) => r.path === PROFILE)!;
+  it('не утаскивает секреты в отчёт', async () => {
+    const { report } = await run((b) => b.tradeType === 'BUY' && b.asset === 'USDT');
+    const winner = report.tries.find((t) => t.good)!;
 
-    assert.equal(profile.response.data.userDetailVo.userStatsRet.completedOrderNum, 637);
-    assert.equal(profile.response.data.userDetailVo.csrfToken, '‹вырезано›');
+    assert.equal(winner.data!.userDetailVo.csrfToken, '‹вырезано›');
 
     const dump = JSON.stringify(report);
-    assert.ok(!dump.includes('SECRET_CSRF'), 'значение csrf-куки утекло в отчёт');
-    assert.ok(!dump.includes('FVKEY-1'), 'антифрод-ключ утёк в отчёт');
+    assert.ok(!dump.includes('SECRET_CSRF'), 'csrf-кука утекла');
+    assert.ok(!dump.includes('FVKEY-1'), 'антифрод-ключ утёк');
   });
 
-  it('прикладывает пути, которые страница дёргала сама', async () => {
+  it('собирает пути страницы вместе с именами параметров', async () => {
     const { report } = await run();
+    const paths = report.pathsPageUsedItself;
 
-    // массив пришёл из песочницы: сравниваем содержимое, а не прототипы
-    assert.equal(report.pathsPageUsedItself.length, 1);
-    assert.equal(report.pathsPageUsedItself[0], '/bapi/c2c/v1/private/c2c/chat/ping-by-type');
-  });
-
-  it('замечает, что пользователь не вошёл на биржу', async () => {
-    const { report } = await run({ cookie: 'lang=ru' });
-    assert.equal(report.loggedIn, false);
+    assert.equal(paths.length, 2, `лишнее в списке: ${paths}`);
+    assert.ok(paths.includes('/bapi/c2c/v1/private/c2c/chat/ping-by-type'));
+    // значения параметров не нужны, а имена подсказывают форму запроса
+    assert.ok(paths.includes('/bapi/c2c/v2/friendly/c2c/user/detail?userNo&lang'));
   });
 });
