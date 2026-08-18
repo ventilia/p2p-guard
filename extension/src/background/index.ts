@@ -16,6 +16,7 @@ import {
   clearCapture,
   getSelfHint,
   recordDomSnapshot,
+  readRawUserPayloads,
   recordNetworkCapture,
   resolveManual,
   resolveOrderContext,
@@ -541,6 +542,10 @@ async function handleMessage(
 
     case 'GET_SETTINGS':
       return { ok: true, data: await getSettings() };
+
+    // сырые ответы биржи для разбора имён полей, см. orderContext
+    case 'GET_RAW_CAPTURES':
+      return { ok: true, data: { items: await readRawUserPayloads() } };
 
     // вошёл ли пользователь в Binance и тем ли аккаунтом, что привязан к учётке
     case 'GET_BINANCE_SESSION': {

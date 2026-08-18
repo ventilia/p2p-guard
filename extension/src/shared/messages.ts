@@ -16,6 +16,7 @@ export type RuntimeRequest =
   | { type: 'AUTH_LOGOUT' }
   | { type: 'GET_SESSION' }
   | { type: 'GET_SETTINGS' }
+  | { type: 'GET_RAW_CAPTURES' }
   | { type: 'SET_SETTINGS'; patch: Partial<Settings> }
   | { type: 'GET_PANEL_STATE'; tabId?: number }
   | { type: 'REFRESH_DOSSIER' }

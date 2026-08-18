@@ -1215,6 +1215,23 @@ function SettingsTab({
 }) {
   const [syncing, setSyncing] = useState(false);
   const [apiUrl, setApiUrl] = useState(settings?.apiBaseUrl ?? '');
+  const [dumped, setDumped] = useState<string | null>(null);
+
+  const dumpRaw = async () => {
+    const response = await sendMessage<{ items: unknown[] }>({ type: 'GET_RAW_CAPTURES' });
+    if (!response.ok) {
+      onError(response.error.message);
+      return;
+    }
+    const items = response.data?.items ?? [];
+    if (!items.length) {
+      onNotice('Пока пусто. Откройте ордер и дождитесь карточки контрагента.');
+      return;
+    }
+    await navigator.clipboard.writeText(JSON.stringify(items, null, 2));
+    setDumped(`Скопировано, ответов: ${items.length}`);
+    setTimeout(() => setDumped(null), 2500);
+  };
 
   const sync = async () => {
     setSyncing(true);
@@ -1422,6 +1439,20 @@ function SettingsTab({
       <button className="btn block" disabled={syncing} onClick={() => void sync()}>
         <IconRefresh size={14} /> {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
       </button>
+
+      {/* временно: имена полей в ответах C2C API не документированы, и подобрать
+          их снаружи не вышло. Кнопка отдаёт сырой ответ, который расширение уже
+          поймало на странице ордера */}
+      <div className="card">
+        <div className="card-title">Диагностика</div>
+        <div className="d">
+          Откройте ордер, дождитесь карточки контрагента и нажмите кнопку — сырой ответ
+          Binance ляжет в буфер обмена. Куки и подписи из него вырезаны.
+        </div>
+        <button className="btn block" style={{ marginTop: 8 }} onClick={() => void dumpRaw()}>
+          {dumped ?? 'Скопировать ответ биржи'}
+        </button>
+      </div>
 
       {/* команда и шаблоны — редкие операции, поэтому свёрнуты: главный экран
           попапа занят тем, что нужно после каждой сделки */}
