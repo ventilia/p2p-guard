@@ -175,7 +175,8 @@ export function planLayout(
 
   return {
     chat: { width, height: chatHeight },
-    panel: { width: width ?? natural.width, height: available - chatHeight },
+    // 0 означает «как у чата», иначе панель шире и уходит влево
+    panel: { width: panel.width, height: available - chatHeight },
   };
 }
 
@@ -200,10 +201,18 @@ export function panelPosition(
     };
   }
 
+  // под чатом панель — самостоятельный блок, а не продолжение колонки:
+  // держим её правый край на краю чата и растим влево, чтобы ширину можно
+  // было увеличить далеко за пределы узкого столбца переписки
+  const width = Math.min(
+    Math.max(panel.width || rect.width, rect.width),
+    rect.left + rect.width - GAP,
+  );
+
   return {
     top: rect.top + rect.height + GAP,
-    left: rect.left,
-    width: rect.width,
+    left: Math.max(GAP, rect.left + rect.width - width),
+    width,
     height: panel.height,
   };
 }

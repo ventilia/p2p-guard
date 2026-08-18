@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.js';
 import { panelStyles } from './styles.js';
 import { sendMessage } from '../shared/messages.js';
+import { scrapeCounterpartyStats } from './statsScrape.js';
 import type { DomSnapshot } from '../shared/types.js';
 
 const HOST_ID = 'p2p-guard-root';
@@ -126,7 +127,11 @@ function scrapeDom(): DomSnapshot | null {
     if (match?.[1]) snapshot.counterpartyUid = match[1];
   }
 
-  return snapshot.counterpartyUid || snapshot.orderId ? snapshot : null;
+  // биржа рисует статистику контрагента рядом с чатом — читаем оттуда
+  const stats = scrapeCounterpartyStats();
+  if (stats) snapshot.stats = stats;
+
+  return snapshot.counterpartyUid || snapshot.orderId || snapshot.stats ? snapshot : null;
 }
 
 let scrapeTimer: number | undefined;

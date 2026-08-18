@@ -193,6 +193,8 @@ async function enrich(
       }
     : counterparty;
 
+  // считаем ДО подмешивания страницы: иначе прочитанные с вёрстки цифры
+  // выглядели бы как готовый профиль и запрос к бирже больше не уходил бы
   const hasStats = result.stats && Object.values(result.stats).some((v) => v !== null && v !== undefined);
 
   // профиль и отзывы биржи тянем параллельно: отзывы нужны, даже когда
@@ -218,6 +220,18 @@ async function enrich(
     };
   }
   if (reviews.length) result = { ...result, exchangeReviews: reviews };
+
+  // цифры со страницы: биржа рисует их сама, и это источник, не зависящий от
+  // имён полей в недокументированном ответе. Данные биржи главнее, поэтому
+  // страница только дополняет пустые места
+  const fromPage = capture.dom?.stats;
+  if (fromPage) {
+    const merged = { ...fromPage };
+    for (const [key, value] of Object.entries(result.stats ?? {})) {
+      if (value !== null && value !== undefined) (merged as Record<string, unknown>)[key] = value;
+    }
+    result = { ...result, stats: merged };
+  }
 
   // кэшируем только настоящие данные биржи: производное значение здесь
   // выглядело бы как готовая статистика, и профиль перестал бы запрашиваться

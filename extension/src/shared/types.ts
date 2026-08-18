@@ -137,6 +137,8 @@ export type DomSnapshot = {
   status?: OrderStatus;
   fiat?: string;
   amountFiat?: number;
+  // цифры из блока «Обзор торговли» рядом с чатом
+  stats?: ExchangeStats;
 };
 
 // откуда взяты данные, показываем в панели

@@ -81,11 +81,11 @@ describe('ползунки размеров чата', () => {
     assert.equal(plan.chat.height, 220);
   });
 
-  it('шире чат — шире и панель', () => {
+  it('шире чат — шире и чат, ширина панели своя', () => {
     const plan = planLayout('chat-bottom', natural, { width: 384, height: 340 }, { width: 560, height: 0 }, view);
 
     assert.equal(plan.chat.width, 560);
-    assert.equal(plan.panel.width, 560);
+    assert.equal(plan.panel.width, 384);
   });
 
   it('ширину чата ограничивает шириной окна', () => {
@@ -94,21 +94,34 @@ describe('ползунки размеров чата', () => {
     assert.equal(plan.chat.width, Math.round(view.width * 0.6));
   });
 
-  it('панель встаёт по фактическому краю расширенного чата, а не по расчётному', () => {
-    // столбец прижат к правому краю: став шире, он уезжает влево
+  it('панель встаёт по фактическому краю чата, а не по расчётному', () => {
     const widened: AnchorBox = { top: 64, left: 880, width: 560, height: 448 };
-    const box = panelPosition('chat-bottom', widened, { width: 560, height: 340 }, view);
+    const box = panelPosition('chat-bottom', widened, { width: 0, height: 340 }, view);
 
     assert.equal(box.left, 880);
     assert.equal(box.width, 560);
   });
 
-  it('и по фактическому краю чата, который расширился вправо', () => {
-    // а этот прижат к левому краю: левый край остался на месте
-    const widened: AnchorBox = { top: 64, left: 1016, width: 560, height: 448 };
-    const box = panelPosition('chat-bottom', widened, { width: 560, height: 340 }, view);
+  it('панель шире чата уходит влево, правый край держится за чат', () => {
+    const box = panelPosition('chat-bottom', chatRect, { width: 900, height: 340 }, view);
 
-    assert.equal(box.left, 1016);
+    assert.equal(box.width, 900);
+    // правый край совпадает с правым краем переписки
+    assert.equal(box.left + box.width, chatRect.left + chatRect.width);
+    assert.equal(box.left, chatRect.left + chatRect.width - 900);
+  });
+
+  it('уже чата панель не делает: колонка и так узкая', () => {
+    const box = panelPosition('chat-bottom', chatRect, { width: 200, height: 340 }, view);
+
+    assert.equal(box.width, chatRect.width);
+  });
+
+  it('не вылезает за левый край экрана при огромной ширине', () => {
+    const box = panelPosition('chat-bottom', chatRect, { width: 5000, height: 340 }, view);
+
+    assert.ok(box.left >= 8, `left=${box.left}`);
+    assert.ok(box.left + box.width <= chatRect.left + chatRect.width);
   });
 });
 

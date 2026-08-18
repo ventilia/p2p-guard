@@ -1358,8 +1358,8 @@ function SettingsTab({
           ))}
         </div>
         <div className="d" style={{ marginTop: 6 }}>
-          «Под чатом» ужимает окно переписки Binance и занимает освободившееся место, ничего не
-          перекрывая
+          «Под чатом» ужимает переписку Binance и ставит панель отдельным блоком под ней. Панель
+          можно сделать шире чата — она растёт влево, на свободное место страницы
         </div>
 
         <Slider
@@ -1391,16 +1391,14 @@ function SettingsTab({
           onChange={(panelHeight) => void onSettings({ panelHeight })}
         />
 
-        {settings?.panelPlacement === 'chat-left' ? (
-          <Slider
-            label="Ширина панели"
-            value={settings?.panelWidth ?? 384}
-            min={280}
-            max={560}
-            step={8}
-            onChange={(panelWidth) => void onSettings({ panelWidth })}
-          />
-        ) : null}
+        <Slider
+          label="Ширина панели"
+          value={settings?.panelWidth ?? 384}
+          min={280}
+          max={1200}
+          step={10}
+          onChange={(panelWidth) => void onSettings({ panelWidth })}
+        />
 
         <button
           className="btn ghost block"
