@@ -17,12 +17,11 @@ export const DEFAULT_SETTINGS: Settings = {
   captureChatRequisites: true,
   theme: 'light',
   panelPlacement: 'chat-bottom',
-  panelWidth: 384,
-  panelHeight: 340,
-  chatWidth: 0,
-  chatHeight: 0,
+  panelWidth: 720,
+  panelHeight: 720,
   // по умолчанию только подставляем: отправку решает трейдер
   templateMode: 'insert',
+  enrichFromProfile: true,
 };
 
 export async function getSession(): Promise<Session | null> {

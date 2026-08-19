@@ -5,7 +5,13 @@ import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.js';
 import { panelStyles } from './styles.js';
 import { sendMessage } from '../shared/messages.js';
-import { scrapeCounterpartyStats } from './statsScrape.js';
+import {
+  onProfilePage,
+  openReviewsTab,
+  profileUserNo,
+  scrapeCounterpartyStats,
+  scrapeExchangeReviews,
+} from './statsScrape.js';
 import type { DomSnapshot } from '../shared/types.js';
 
 const HOST_ID = 'p2p-guard-root';
@@ -134,6 +140,18 @@ function scrapeDom(): DomSnapshot | null {
   return snapshot.counterpartyUid || snapshot.orderId || snapshot.stats ? snapshot : null;
 }
 
+// страница профиля открывается фоновой вкладкой ради недостающих полей:
+// пользователь остаётся в ордере и ничего не замечает
+function reportProfile(): void {
+  const userNo = profileUserNo();
+  if (!userNo) return;
+
+  const stats = scrapeCounterpartyStats();
+  if (!stats) return;
+
+  void sendMessage({ type: 'PROFILE_STATS', userNo, stats, reviews: scrapeExchangeReviews() });
+}
+
 let scrapeTimer: number | undefined;
 let lastScrapeJson = '';
 
@@ -149,6 +167,28 @@ function scheduleScrape(): void {
 
     void sendMessage({ type: 'DOM_SNAPSHOT', snapshot });
   }, 800);
+}
+
+// профиль рисуется не сразу, поэтому пробуем несколько раз и умолкаем
+function watchProfile(): void {
+  let left = 14;
+  let opened = false;
+
+  const timer = window.setInterval(() => {
+    left -= 1;
+    const stats = scrapeCounterpartyStats();
+
+    // цифры готовы — открываем вкладку отзывов и даём ей отрисоваться
+    if (!opened && stats?.totalOrders !== undefined) {
+      opened = true;
+      if (openReviewsTab()) return;
+    }
+
+    if (opened || left <= 0) {
+      window.clearInterval(timer);
+      reportProfile();
+    }
+  }, 700);
 }
 
 // слушаем только добавление узлов и схлопываем всплеск в один разбор
@@ -168,10 +208,12 @@ if (document.readyState === 'loading') {
     () => {
       mountPanel();
       watchDom();
+      if (onProfilePage()) watchProfile();
     },
     { once: true },
   );
 } else {
   mountPanel();
   watchDom();
+  if (onProfilePage()) watchProfile();
 }

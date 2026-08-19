@@ -22,6 +22,7 @@ import {
   resolveOrderContext,
   type OrderContext,
 } from './orderContext.js';
+import { acceptProfileStats } from './profileProbe.js';
 import type { RuntimeRequest, RuntimeResponse } from '../shared/messages.js';
 import { extractRequisites } from '../shared/parse.js';
 import {
@@ -198,6 +199,7 @@ async function lookupDossier(
       countryCode: counterparty.countryCode,
       maskedPhone: counterparty.maskedPhone,
       stats: counterparty.stats,
+      exchangeReviews: counterparty.exchangeReviews,
       // ордер отправляем, только если он полноценный
       order: order?.externalId ? order : undefined,
     },
@@ -261,6 +263,31 @@ async function handleOrder(tabId: number, orderId: string): Promise<void> {
 }
 
 // перезапрос досье для вкладки с тем же ордером
+/**
+ * Пересобирает досье во вкладках, где открыт этот контрагент.
+ *
+ * Профиль читается фоновой вкладкой уже после того, как панель показана,
+ * поэтому карточку надо обновить, иначе новые поля увидят только при
+ * следующем открытии ордера.
+ */
+async function refreshOrderTabs(userNo: string): Promise<void> {
+  const tabs = await chrome.tabs.query({ url: ['https://*.binance.com/*'] });
+
+  for (const tab of tabs) {
+    if (tab.id === undefined) continue;
+
+    const state = await getPanelState(tab.id);
+    if (state.status !== 'ready') continue;
+    if (state.dossier.counterparty.externalId !== userNo) continue;
+
+    try {
+      await refreshTab(tab.id);
+    } catch (err) {
+      console.warn('[P2P Guard] не удалось обновить карточку после профиля', err);
+    }
+  }
+}
+
 async function refreshTab(tabId: number): Promise<PanelState> {
   const state = await getPanelState(tabId);
   const orderId = 'orderId' in state ? state.orderId : undefined;
@@ -544,6 +571,13 @@ async function handleMessage(
       return { ok: true, data: await getSettings() };
 
     // сырые ответы биржи для разбора имён полей, см. orderContext
+    // профиль контрагента прочитан фоновой вкладкой
+    case 'PROFILE_STATS':
+      await acceptProfileStats(request.userNo, request.stats, request.reviews, tabId);
+      // карточка уже показана без этих полей — пересобираем её
+      void refreshOrderTabs(request.userNo);
+      return { ok: true, data: { ok: true } };
+
     case 'GET_RAW_CAPTURES':
       return { ok: true, data: { items: await readRawUserPayloads() } };
 

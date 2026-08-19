@@ -9,7 +9,9 @@ import {
   normalizeOrderDetail,
   normalizeUserDetail,
 } from './binance.js';
-import type { CounterpartySnapshot, DomSnapshot, OrderSnapshot } from '../shared/types.js';
+import { readProfileStats, startProfileProbe } from './profileProbe.js';
+import { getSettings } from '../shared/storage.js';
+import type { CounterpartySnapshot, DomSnapshot, ExchangeStats, OrderSnapshot } from '../shared/types.js';
 
 export type ContextSource = 'intercept' | 'api' | 'dom' | 'manual';
 
@@ -235,9 +237,43 @@ async function enrich(
 
   // кэшируем только настоящие данные биржи: производное значение здесь
   // выглядело бы как готовая статистика, и профиль перестал бы запрашиваться
+  // проверки аккаунта и дата регистрации есть только в профиле
+  const cached = await readProfileStats(result.externalId);
+  if (cached) {
+    result = { ...result, stats: fill(result.stats, cached.stats) };
+    // отзывы биржи есть только в профиле, из ордера их не видно
+    if (cached.reviews?.length && !result.exchangeReviews?.length) {
+      result = { ...result, exchangeReviews: cached.reviews };
+    }
+  }
+
+  // за недостающим идём фоновой вкладкой и НЕ ждём её: панель должна
+  // появиться сразу, поля дозаполнятся, когда страница отчитается
+  if (needsProfile(result.stats)) {
+    void getSettings().then(({ enrichFromProfile }) => {
+      if (enrichFromProfile) void startProfileProbe(result.externalId);
+    });
+  }
+
   if (detail || reviews.length) capture.users.set(result.externalId, result);
 
   return result;
+}
+
+// поля, ради которых стоит открывать профиль: в ордере их не показывают
+const PROFILE_ONLY: (keyof ExchangeStats)[] = ['joinedAt', 'kycVerified', 'totalOrders'];
+
+function needsProfile(stats: ExchangeStats | undefined): boolean {
+  return PROFILE_ONLY.some((key) => stats?.[key] === undefined || stats?.[key] === null);
+}
+
+// то, что уже знаем, важнее: профиль только заполняет пустые места
+function fill(base: ExchangeStats | undefined, extra: ExchangeStats): ExchangeStats {
+  const merged: ExchangeStats = { ...extra };
+  for (const [key, value] of Object.entries(base ?? {})) {
+    if (value !== null && value !== undefined) (merged as Record<string, unknown>)[key] = value;
+  }
+  return merged;
 }
 
 // ждём перехват и параллельно пробуем API, берём что сработало раньше

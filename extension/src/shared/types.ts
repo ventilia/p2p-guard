@@ -21,9 +21,8 @@ export type Session = {
   };
 };
 
-// куда цеплять панель в ордере: чат на странице ордера фиксированный и тянется
-// до низа экрана, поэтому «под чатом» означает подрезать чат и встать под ним
-export type PanelPlacement = 'chat-bottom' | 'chat-left' | 'floating';
+// панель либо отдельный блок документа под чатом, либо накладка поверх окна
+export type PanelPlacement = 'chat-bottom' | 'floating';
 
 // шаблон либо подставляется в поле ввода, либо сразу уходит собеседнику
 export type TemplateMode = 'insert' | 'send';
@@ -38,10 +37,9 @@ export type Settings = {
   panelPlacement: PanelPlacement;
   panelWidth: number;
   panelHeight: number;
-  // 0 — не трогать столбец чата, иначе задаём его размер сами
-  chatWidth: number;
-  chatHeight: number;
   templateMode: TemplateMode;
+  // открывать профиль контрагента фоновой вкладкой ради недостающих полей
+  enrichFromProfile: boolean;
 };
 
 export type ExchangeStats = {

@@ -1327,6 +1327,21 @@ function SettingsTab({
         </div>
         <div className="switch">
           <div>
+            <div className="k">Дочитывать профиль контрагента</div>
+            <div className="d">
+              часть данных — проверки аккаунта, дата регистрации, полная история — есть только на
+              странице профиля. Расширение открывает её фоновой вкладкой и сразу закрывает, вы
+              остаётесь в ордере
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings?.enrichFromProfile ?? true}
+            onChange={(e) => void onSettings({ enrichFromProfile: e.target.checked })}
+          />
+        </div>
+        <div className="switch">
+          <div>
             <div className="k">Собирать реквизиты из чата</div>
             <div className="d">ловит подмену карты в процессе сделки</div>
           </div>
@@ -1344,7 +1359,6 @@ function SettingsTab({
           {(
             [
               ['chat-bottom', 'Под чатом'],
-              ['chat-left', 'Слева от чата'],
               ['floating', 'Свободно'],
             ] as const
           ).map(([value, label]) => (
@@ -1358,52 +1372,33 @@ function SettingsTab({
           ))}
         </div>
         <div className="d" style={{ marginTop: 6 }}>
-          «Под чатом» ужимает переписку Binance и ставит панель отдельным блоком под ней. Панель
-          можно сделать шире чата — она растёт влево, на свободное место страницы
+          «Под чатом» — отдельный блок на странице ниже переписки: вёрстку биржи не трогаем, к
+          панели просто прокручиваетесь. Она шире колонки чата и растёт влево, на свободное место
         </div>
 
+        {/* нижняя граница — размер по умолчанию: сузить панель нельзя, только растянуть */}
         <Slider
-          label="Ширина чата"
-          value={settings?.chatWidth ?? 0}
-          min={280}
-          max={720}
-          step={8}
-          auto="как у Binance"
-          onChange={(chatWidth) => void onSettings({ chatWidth })}
-        />
-
-        <Slider
-          label="Высота чата"
-          value={settings?.chatHeight ?? 0}
-          min={220}
-          max={900}
+          label="Ширина панели"
+          value={settings?.panelWidth ?? 720}
+          min={720}
+          max={1600}
           step={20}
-          auto="по высоте панели"
-          onChange={(chatHeight) => void onSettings({ chatHeight })}
+          onChange={(panelWidth) => void onSettings({ panelWidth })}
         />
 
         <Slider
           label="Высота панели"
-          value={settings?.panelHeight ?? 340}
-          min={200}
-          max={720}
+          value={settings?.panelHeight ?? 720}
+          min={720}
+          max={2000}
           step={20}
           onChange={(panelHeight) => void onSettings({ panelHeight })}
-        />
-
-        <Slider
-          label="Ширина панели"
-          value={settings?.panelWidth ?? 384}
-          min={280}
-          max={1200}
-          step={10}
-          onChange={(panelWidth) => void onSettings({ panelWidth })}
         />
 
         <button
           className="btn ghost block"
           style={{ marginTop: 10 }}
-          onClick={() => void onSettings({ chatWidth: 0, chatHeight: 0, panelHeight: 340, panelWidth: 384 })}
+          onClick={() => void onSettings({ panelHeight: 720, panelWidth: 720 })}
         >
           Сбросить размеры
         </button>

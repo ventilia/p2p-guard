@@ -10,8 +10,8 @@ import {
 } from '../shared/icons.js';
 import { DossierView, type DossierActions } from '../ui/dossier.js';
 import { insertIntoChat } from './chatInput.js';
-import { computeLayout, releaseChat, watchLayout, type AnchorBox } from './anchor.js';
-import { watchPageTheme, type PageTheme } from './pageTheme.js';
+import { computeLayout, watchLayout, type Layout } from './anchor.js';
+import { detectPageTheme, watchPageTheme, type PageTheme } from './pageTheme.js';
 import { DEFAULT_SETTINGS } from '../shared/storage.js';
 import type { PanelState, Settings } from '../shared/types.js';
 
@@ -78,8 +78,9 @@ export function Panel() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [collapsed, setCollapsed] = useState(false);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [box, setBox] = useState<AnchorBox | null>(null);
-  const [pageTheme, setPageTheme] = useState<PageTheme>(null);
+  const [layout, setLayout] = useState<Layout | null>(null);
+  // синхронно на первом рендере: промежуточное 'auto' красило панель наполовину
+  const [pageTheme, setPageTheme] = useState<PageTheme>(() => detectPageTheme());
   const dragRef = useRef<{ startX: number; startY: number; baseX: number; baseY: number } | null>(null);
 
   // «как в системе» на странице биржи означает «как у биржи»
@@ -114,40 +115,32 @@ export function Panel() {
     };
   }, []);
 
-  // привязка к чату: пока панель свёрнута или скрыта, чат трогать не за что
+  // пока панель свёрнута или скрыта, место под неё считать незачем
   const active = state.status !== 'idle' && !collapsed;
 
   useEffect(() => {
     if (!active) {
-      releaseChat();
-      setBox(null);
+      setLayout(null);
       return undefined;
     }
     return watchLayout(() => {
-      const layout = computeLayout(
-        settings.panelPlacement,
-        { width: settings.panelWidth, height: settings.panelHeight },
-        { width: settings.chatWidth, height: settings.chatHeight },
-      );
+      const next = computeLayout(settings.panelPlacement, {
+        width: settings.panelWidth,
+        height: settings.panelHeight,
+      });
       // сравниваем по значению: иначе каждый кадр давал бы новый рендер
-      setBox((prev) =>
+      setLayout((prev) =>
         prev &&
-        prev.top === layout.box.top &&
-        prev.left === layout.box.left &&
-        prev.width === layout.box.width &&
-        prev.height === layout.box.height
+        prev.position === next.position &&
+        prev.box.top === next.box.top &&
+        prev.box.left === next.box.left &&
+        prev.box.width === next.box.width &&
+        prev.box.height === next.box.height
           ? prev
-          : layout.box,
+          : next,
       );
     });
-  }, [
-    active,
-    settings.panelPlacement,
-    settings.panelWidth,
-    settings.panelHeight,
-    settings.chatWidth,
-    settings.chatHeight,
-  ]);
+  }, [active, settings.panelPlacement, settings.panelWidth, settings.panelHeight]);
 
   // перетаскивание за шапку
   useEffect(() => {
@@ -186,9 +179,18 @@ export function Panel() {
   const transform = `translate(${offset.x}px, ${offset.y}px)`;
   const ready = state.status === 'ready' ? state : null;
 
-  // привязанная панель живёт в координатах чата, свободная — в правом верхнем углу
-  const rootStyle = box
-    ? { transform, top: box.top, left: box.left, right: 'auto', width: box.width, maxHeight: box.height }
+  // под чатом панель — блок документа: absolute в координатах страницы,
+  // поэтому прокручивается вместе с ней. Свободная висит поверх окна
+  const rootStyle = layout
+    ? {
+        transform,
+        position: layout.position,
+        top: layout.box.top,
+        left: layout.box.left,
+        right: 'auto' as const,
+        width: layout.box.width,
+        maxHeight: layout.box.height,
+      }
     : { transform };
 
   if (collapsed) {

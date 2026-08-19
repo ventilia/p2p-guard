@@ -1,21 +1,23 @@
-// поиск чата на странице ордера и расчёт места под панель
+// место для панели на странице ордера
 //
-// вёрстка снята с живой страницы /ru/fiatOrderDetail: чат — фиксированный
-// столбец справа (div.flex.fixed.z-[999]) высотой во весь экран, внутри него
-// шапка, лента сообщений и поле ввода. Значит «под чатом» = подрезать чат по
-// высоте и занять освободившийся низ, иначе панель просто накроет переписку.
+// Панель — САМОСТОЯТЕЛЬНЫЙ блок документа под чатом, а не накладка поверх него.
+// Раньше она была fixed и ужимала переписку, чтобы влезть в её колонку: снаружи
+// это читалось как часть чата, а на некоторых размерах разъезжалось. Теперь
+// вёрстку биржи не трогаем вовсе — блок живёт в координатах документа, ниже
+// чата, и прокручивается вместе со страницей.
 //
-// селекторы биржи меняются, поэтому чат ищем от поля ввода вверх, а классы
-// используем лишь как подсказку
+// Чат ищем от поля ввода вверх: классы у биржи генерируемые, а поле ввода есть
+// всегда.
 
 import type { PanelPlacement } from '../shared/types.js';
 import { findChatInput } from './chatInput.js';
 
 export type AnchorBox = { top: number; left: number; width: number; height: number };
+export type Viewport = { width: number; height: number };
 
-const GAP = 8;
-const MIN_CHAT_HEIGHT = 220;
-const MIN_PANEL_HEIGHT = 160;
+const GAP = 12;
+// панель не должна быть уже колонки чата: там нечего показывать
+const MIN_WIDTH = 320;
 
 // столбец чата: от поля ввода поднимаемся, пока блок растёт по высоте
 function findChatColumn(): HTMLElement | null {
@@ -27,197 +29,40 @@ function findChatColumn(): HTMLElement | null {
 
   for (let depth = 0; node && depth < 10; node = node.parentElement, depth += 1) {
     const rect = node.getBoundingClientRect();
-    // столбец чата заметно выше поля ввода и не шире половины экрана
     if (rect.height > 260 && rect.width > 200 && rect.width < window.innerWidth * 0.6) {
       best = node;
     }
-    // выше по дереву начинается общий контейнер страницы, дальше не идём
     if (rect.width > window.innerWidth * 0.7) break;
   }
 
   return best;
 }
 
-export type Viewport = { width: number; height: number };
-
 /**
- * Правки чата надо уметь откатить, а ещё помнить размеры ДО них: иначе каждый
- * пересчёт мерил уже подрезанный чат и ужимал его снова — за несколько тиков
- * переписка схлопывалась в полоску.
+ * Координаты блока в документе, а не в окне.
  *
- * Размеры окна храним рядом: после ресайза исходная высота столбца другая, и
- * старый замер отправлял бы панель за пределы экрана.
+ * anchor — прямоугольник чата в координатах окна, scroll — текущая прокрутка.
+ * Панель прижата правым краем к чату и растёт влево: колонка переписки узкая,
+ * а слева на странице обычно пусто.
  */
-let sized: {
-  el: HTMLElement;
-  css: { width: string; height: string; minHeight: string };
-  natural: { width: number; height: number };
-  view: Viewport;
-} | null = null;
-
-function restoreChat(): void {
-  if (!sized) return;
-  sized.el.style.width = sized.css.width;
-  sized.el.style.height = sized.css.height;
-  sized.el.style.minHeight = sized.css.minHeight;
-  sized = null;
-}
-
-export function releaseChat(): void {
-  restoreChat();
-}
-
-const sameView = (a: Viewport, b: Viewport) => a.width === b.width && a.height === b.height;
-
-/**
- * Задаёт чату размеры и возвращает его исходные габариты.
- * Если что-то из размеров null — эта сторона остаётся такой, какой её сделала биржа.
- */
-function applyChatSize(
-  el: HTMLElement,
-  view: Viewport,
-  size: { width: number | null; height: number | null },
-  natural: { width: number; height: number },
-): void {
-  if (size.width === null && size.height === null) {
-    restoreChat();
-    return;
-  }
-
-  // measureNatural к этому моменту уже откатил чужие правки, если они были
-  if (!sized) {
-    sized = {
-      el,
-      css: { width: el.style.width, height: el.style.height, minHeight: el.style.minHeight },
-      natural,
-      view,
-    };
-  }
-
-  el.style.width = size.width === null ? sized.css.width : `${size.width}px`;
-
-  if (size.height === null) {
-    el.style.height = sized.css.height;
-    el.style.minHeight = sized.css.minHeight;
-  } else {
-    el.style.height = `${size.height}px`;
-    el.style.minHeight = `${size.height}px`;
-  }
-}
-
-/**
- * Габариты столбца без наших правок.
- * Если правки уже наложены и окно с тех пор не менялось — берём запомненные,
- * иначе откатываем стили и меряем заново.
- */
-function measureNatural(el: HTMLElement, view: Viewport): { width: number; height: number } {
-  if (sized && sized.el === el && sameView(sized.view, view)) return sized.natural;
-
-  // другой элемент или другое окно — прежний замер недействителен
-  restoreChat();
-  const rect = el.getBoundingClientRect();
-  return { width: rect.width, height: rect.height };
-}
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
-
-// пользовательские размеры чата, 0 означает «оставить как у биржи»
-export type ChatSize = { width: number; height: number };
-
-export type Plan = {
-  // что задать столбцу чата; null — не трогать эту сторону
-  chat: { width: number | null; height: number | null };
-  // какого размера получится панель
-  panel: { width: number; height: number };
-};
-
-/**
- * Геометрия без DOM: по исходным габаритам столбца решает, каким сделать чат и
- * какого размера будет панель. Позицию здесь НЕ считаем — её берём с живого
- * элемента уже после того, как размеры применены, иначе приходится угадывать,
- * в какую сторону поедет край столбца, и панель разъезжается с чатом.
- */
-export function planLayout(
-  placement: Exclude<PanelPlacement, 'floating'>,
-  natural: { width: number; height: number },
+export function documentBox(
+  anchor: AnchorBox,
   panel: { width: number; height: number },
-  chatSize: ChatSize,
-  view: Viewport,
-): Plan {
-  const maxWidth = Math.max(260, Math.round(view.width * 0.6));
-  const width = chatSize.width > 0 ? clamp(chatSize.width, 260, maxWidth) : null;
-
-  if (placement === 'chat-left') {
-    // чат не делим, но выше своей колонки он не нужен: столбец начинается не от
-    // нуля, поэтому мерить по высоте окна нельзя — вылезет за нижний край
-    const maxHeight = Math.max(MIN_CHAT_HEIGHT, natural.height);
-    return {
-      chat: {
-        width,
-        height: chatSize.height > 0 ? clamp(chatSize.height, MIN_CHAT_HEIGHT, maxHeight) : null,
-      },
-      panel: {
-        width: panel.width,
-        height: Math.min(panel.height, view.height - GAP * 2),
-      },
-    };
-  }
-
-  // chat-bottom: столбец делится между перепиской и панелью
-  const available = natural.height - GAP;
-  const maxChat = Math.max(MIN_CHAT_HEIGHT, available - MIN_PANEL_HEIGHT);
-
-  // заданная высота чата главнее: её тянут ползунком и ждут точного результата
-  const chatHeight =
-    chatSize.height > 0
-      ? clamp(chatSize.height, MIN_CHAT_HEIGHT, maxChat)
-      : clamp(available - panel.height, MIN_CHAT_HEIGHT, maxChat);
-
-  return {
-    chat: { width, height: chatHeight },
-    // 0 означает «как у чата», иначе панель шире и уходит влево
-    panel: { width: panel.width, height: available - chatHeight },
-  };
-}
-
-/**
- * Позиция панели относительно ЖИВОГО прямоугольника чата.
- * rect читается после применения размеров, поэтому гадать, куда уехал край
- * столбца при смене ширины, не нужно.
- */
-export function panelPosition(
-  placement: Exclude<PanelPlacement, 'floating'>,
-  rect: AnchorBox,
-  panel: { width: number; height: number },
+  scroll: { x: number; y: number },
   view: Viewport,
 ): AnchorBox {
-  if (placement === 'chat-left') {
-    const width = Math.max(240, Math.min(panel.width, rect.left - GAP * 2));
-    return {
-      top: rect.top,
-      left: Math.max(GAP, rect.left - width - GAP),
-      width,
-      height: Math.min(panel.height, view.height - rect.top - GAP),
-    };
-  }
-
-  // под чатом панель — самостоятельный блок, а не продолжение колонки:
-  // держим её правый край на краю чата и растим влево, чтобы ширину можно
-  // было увеличить далеко за пределы узкого столбца переписки
-  const width = Math.min(
-    Math.max(panel.width || rect.width, rect.width),
-    rect.left + rect.width - GAP,
-  );
+  const right = anchor.left + anchor.width;
+  const width = Math.min(Math.max(panel.width, anchor.width, MIN_WIDTH), right - GAP);
 
   return {
-    top: rect.top + rect.height + GAP,
-    left: Math.max(GAP, rect.left + rect.width - width),
+    top: anchor.top + anchor.height + GAP + scroll.y,
+    left: Math.max(GAP, right - width) + scroll.x,
     width,
     height: panel.height,
   };
 }
 
-// свободная позиция: правый верх, как было до привязки
+// свободное размещение: правый верх окна, панель никуда не привязана
 export function floatingBox(width: number, height: number, view: Viewport): AnchorBox {
   return {
     top: 76,
@@ -227,45 +72,39 @@ export function floatingBox(width: number, height: number, view: Viewport): Anch
   };
 }
 
-export type Layout = { box: AnchorBox; anchored: boolean };
+export type Layout = {
+  box: AnchorBox;
+  // absolute — блок в потоке документа, fixed — накладка поверх окна
+  position: 'absolute' | 'fixed';
+};
 
-/**
- * Считает место под панель и, если надо, меняет размеры чата.
- * Возвращает anchored=false, когда чат не найден — тогда панель висит свободно.
- */
 export function computeLayout(
   placement: PanelPlacement,
   panel: { width: number; height: number },
-  chatSize: ChatSize,
 ): Layout {
   const view: Viewport = { width: window.innerWidth, height: window.innerHeight };
 
   const chat = placement === 'floating' ? null : findChatColumn();
   if (!chat) {
-    restoreChat();
-    return { box: floatingBox(panel.width, panel.height, view), anchored: false };
+    return { box: floatingBox(panel.width, panel.height, view), position: 'fixed' };
   }
 
-  const kind = placement as Exclude<PanelPlacement, 'floating'>;
-  const natural = measureNatural(chat, view);
-  const plan = planLayout(kind, natural, panel, chatSize, view);
-
-  applyChatSize(chat, view, plan.chat, natural);
-
-  // меряем уже изменённый столбец: его край мог уехать от смены ширины
   const rect = chat.getBoundingClientRect();
-  const box = panelPosition(
-    kind,
-    { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
-    plan.panel,
-    view,
-  );
+  const scroll = { x: window.scrollX, y: window.scrollY };
 
-  return { box, anchored: true };
+  return {
+    box: documentBox(
+      { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
+      panel,
+      scroll,
+      view,
+    ),
+    position: 'absolute',
+  };
 }
 
 /**
- * Пересчитывает раскладку при любых изменениях страницы.
+ * Пересчитывает раскладку при изменениях страницы.
  * Чат появляется не сразу и переезжает при ресайзе, поэтому одного замера мало.
  */
 export function watchLayout(compute: () => void): () => void {
@@ -276,12 +115,13 @@ export function watchLayout(compute: () => void): () => void {
   };
 
   window.addEventListener('resize', schedule);
+  // блок в координатах документа: при прокрутке пересчёт не нужен, но чат
+  // фиксированный и его top меняется вместе с ней
   window.addEventListener('scroll', schedule, true);
 
   const observer = new MutationObserver(schedule);
   observer.observe(document.body ?? document.documentElement, { childList: true, subtree: true });
 
-  // страховка на случай, если чат перерисовался без мутаций в наблюдаемом поддереве
   const timer = window.setInterval(schedule, 2000);
 
   compute();
@@ -292,6 +132,5 @@ export function watchLayout(compute: () => void): () => void {
     window.removeEventListener('resize', schedule);
     window.removeEventListener('scroll', schedule, true);
     observer.disconnect();
-    restoreChat();
   };
 }

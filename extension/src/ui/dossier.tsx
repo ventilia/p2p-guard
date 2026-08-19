@@ -352,29 +352,12 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
           </div>
         </div>
 
-        <div className="stat">
-          <div className="stat-name">Оборот</div>
-          <div className="stat-pair">
-            <span className="stat-k">Всего</span>
-            <span className="stat-v">{fmtMoney(s.totalVolumeFiat)}</span>
-          </div>
-          <div className="stat-pair">
-            <span className="stat-k">30 дней</span>
-            <span className="stat-v">{fmtMoney(s.volume30dFiat)}</span>
-          </div>
-        </div>
+      </div>
 
-        <div className={`stat ${s.blockedBy ? 'flag' : ''}`}>
-          <div className="stat-name">Репутация</div>
-          <div className="stat-pair">
-            <span className="stat-k">Заблокировали</span>
-            <span className="stat-v">{fmtNumber(s.blockedBy)}</span>
-          </div>
-          <div className="stat-pair">
-            <span className="stat-k">Подписчиков</span>
-            <span className="stat-v">{fmtNumber(s.followers)}</span>
-          </div>
-        </div>
+      {/* биржа средний чек не отдаёт, и придумывать его нельзя */}
+      <div className="hint" style={{ marginTop: 8 }}>
+        Средний чек Binance не публикует — он считается по сделкам из базы P2P Guard и уточняется
+        по мере их накопления.
       </div>
 
       <div className="verify">

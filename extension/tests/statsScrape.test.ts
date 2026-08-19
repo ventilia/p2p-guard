@@ -1,16 +1,17 @@
 /**
- * Чтение статистики контрагента из вёрстки страницы ордера.
+ * Чтение статистики контрагента из вёрстки Binance.
  *
- * Это основной источник половины карточки: приватный C2C API отбивает прямые
- * запросы, а из перехваченного ответа узнаются не все поля. Разметка взята с
- * живой страницы — блок «Обзор торговли» рядом с чатом.
+ * Разметка здесь повторяет живую страницу профиля: подпись и значение лежат в
+ * РАЗНЫХ ветках карточки, а число и его единица — отдельными узлами
+ * (span «376» + span «Раз(-а)»). Рядом с подписью висит подсказка, в которой
+ * тоже есть цифры — попасть в неё нельзя.
  */
 import assert from 'node:assert/strict';
 import { describe, it, before, after } from 'node:test';
 
-let scrapeCounterpartyStats: typeof import('../src/content/statsScrape.js').scrapeCounterpartyStats;
+let scrape: typeof import('../src/content/statsScrape.js').scrapeCounterpartyStats;
 
-// узкая заглушка DOM: нужен обход элементов и их текст, больше ничего
+// узкая заглушка DOM: нужен обход детей и текст, больше ничего
 class El {
   tag: string;
   children: El[] = [];
@@ -22,9 +23,11 @@ class El {
     this.own = text;
   }
 
-  add(child: El): El {
-    child.parentElement = this;
-    this.children.push(child);
+  add(...kids: El[]): El {
+    for (const kid of kids) {
+      kid.parentElement = this;
+      this.children.push(kid);
+    }
     return this;
   }
 
@@ -32,40 +35,43 @@ class El {
     return this.children.length ? this.children.map((c) => c.textContent).join('') : this.own;
   }
 
-  get nextElementSibling(): El | null {
-    const kids = this.parentElement?.children ?? [];
-    return kids[kids.indexOf(this) + 1] ?? null;
-  }
-
-  get previousElementSibling(): El | null {
-    const kids = this.parentElement?.children ?? [];
-    return kids[kids.indexOf(this) - 1] ?? null;
-  }
-
   flatten(): El[] {
     return [this, ...this.children.flatMap((c) => c.flatten())];
   }
 }
 
-const pair = (label: string, value: string) =>
-  new El('div').add(new El('span', label)).add(new El('b', value));
+const el = (tag: string, text = '') => new El(tag, text);
 
-// как на живой странице: подпись слева, значение справа
-function buildPage(): El {
-  const root = new El('div');
-  root.add(new El('h4', 'Обзор торговли'));
-  root.add(pair('Все сделки', '885 Раз(а)'));
-  root.add(pair('Ордера за 30д', '480 раз(а)'));
-  root.add(pair('Выполненных заказов за 30д (%)', '99.26%'));
-  root.add(pair('Средн. время перевода', '4.64 Минут(-ы)'));
-  root.add(pair('Средн. время оплаты', '2.79 Минут(-ы)'));
-  root.add(new El('div', 'Обратная связь (81)'));
-  root.add(new El('div', 'Присоединился 2022-10-20'));
+/** Карточка статистики: подпись с подсказкой слева, число с единицей справа. */
+function card(label: string, value: string, unit: string, hint = ''): El {
+  return el('div').add(
+    el('div').add(el('div').add(el('div', label), el('div', hint))),
+    el('div').add(el('div').add(el('span', value), el('span', unit))),
+  );
+}
+
+function profilePage(): El {
+  const root = el('div');
+  root.add(card('Все сделки', '376', 'Раз(-а)', 'Покупка: 63 / Продажа: 313'));
+  root.add(card('Ордера за 30д', '87', 'Раз(-а)', 'Ордеров за последние 30 дней'));
+  root.add(card('Выполненных заказов за 30д (%)', '98.90', '%', 'сделки/ордера за 30 дн. * 100%'));
+  root.add(card('Средн. время перевода', '6.94', 'Минут(-ы)', 'за последние 30 дней'));
+  root.add(card('Средн. время оплаты', '2.15', 'Минут(-ы)', 'за последние 30 дней'));
+  root.add(el('div').add(el('div', 'Почта'), el('div', 'SMS'), el('div', 'Подтверждение личности')));
   return root;
 }
 
-function installDom(root: El, bodyText: string) {
+const PAGE_TEXT =
+  'Aqniyet Yerkebulankyzy Был(а) 49 мин. назад Присоединился 2024-10-26 ' +
+  'Почта SMS Подтверждение личности Активные объявления Обратная связь (21)';
+
+function installDom(root: El, bodyText: string, url: string) {
   const all = root.flatten();
+  (globalThis as any).location = {
+    pathname: url.split('?')[0],
+    search: url.includes('?') ? `?${url.split('?')[1]}` : '',
+    href: `https://c2c.binance.com${url}`,
+  };
   (globalThis as any).document = {
     querySelectorAll: (sel: string) => {
       const tags = sel.split(',').map((s) => s.trim());
@@ -75,57 +81,79 @@ function installDom(root: El, bodyText: string) {
   };
 }
 
+const PROFILE_URL = '/ru/advertiserDetail?advertiserNo=s614c56fbce66306eacb3f22406cf3ba7';
+const ORDER_URL = '/ru/fiatOrderDetail?orderNo=22923118198088511488';
+
 before(async () => {
-  installDom(buildPage(), 'Присоединился 2022-10-20 · Был(а) 22 мин. назад');
-  ({ scrapeCounterpartyStats } = await import('../src/content/statsScrape.js'));
+  installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+  ({ scrapeCounterpartyStats: scrape } = await import('../src/content/statsScrape.js'));
 });
 
 after(() => {
   delete (globalThis as any).document;
+  delete (globalThis as any).location;
 });
 
-describe('статистика со страницы ордера', () => {
-  it('читает числа рядом с подписями', () => {
-    const s = scrapeCounterpartyStats()!;
+describe('статистика профиля', () => {
+  it('берёт числа из карточек, а не из подсказок рядом', () => {
+    installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+    const s = scrape()!;
 
-    assert.equal(s.totalOrders, 885);
-    assert.equal(s.orders30d, 480);
+    assert.equal(s.totalOrders, 376);
+    // в подсказке «за последние 30 дней» тоже есть 30 — она не должна победить
+    assert.equal(s.orders30d, 87);
   });
 
   it('приводит проценты к доле', () => {
-    assert.equal(scrapeCounterpartyStats()!.completionRate30d, 0.9926);
+    installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+    assert.equal(scrape()!.completionRate30d, 0.989);
   });
 
   it('округляет время до минут', () => {
-    const s = scrapeCounterpartyStats()!;
+    installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+    const s = scrape()!;
 
-    assert.equal(s.avgReleaseMinutes, 5);
-    assert.equal(s.avgPayMinutes, 3);
+    assert.equal(s.avgReleaseMinutes, 7);
+    assert.equal(s.avgPayMinutes, 2);
   });
 
-  it('берёт число из самой подписи, если оно там', () => {
-    assert.equal(scrapeCounterpartyStats()!.feedbackCount, 81);
+  it('читает дату регистрации и число отзывов', () => {
+    installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+    const s = scrape()!;
+
+    assert.equal(s.joinedAt, '2024-10-26T00:00:00.000Z');
+    assert.equal(s.feedbackCount, 21);
   });
 
-  it('разбирает дату регистрации', () => {
-    assert.equal(scrapeCounterpartyStats()!.joinedAt, '2022-10-20T00:00:00.000Z');
+  it('отмечает пройденные проверки аккаунта', () => {
+    installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
+    const s = scrape()!;
+
+    assert.equal(s.emailVerified, true);
+    assert.equal(s.phoneVerified, true);
+    assert.equal(s.kycVerified, true);
+  });
+
+  it('в ордере проверки не выдумывает: там их не показывают', () => {
+    installDom(profilePage(), PAGE_TEXT, ORDER_URL);
+    const s = scrape()!;
+
+    assert.equal(s.kycVerified, undefined);
+    // а цифры в ордере читаются так же
+    assert.equal(s.totalOrders, 376);
   });
 
   it('молчит на странице без этих подписей', () => {
-    const empty = new El('div');
-    empty.add(new El('span', 'Переведите оплату в течение'));
-    empty.add(new El('b', '20:25'));
-    installDom(empty, 'Переведите оплату');
+    const empty = el('div').add(el('div', 'Переведите оплату в течение'), el('div', '20:25'));
+    installDom(empty, 'Переведите оплату', ORDER_URL);
 
-    assert.equal(scrapeCounterpartyStats(), null);
+    assert.equal(scrape(), null);
   });
 
-  it('не принимает время за проценты и наоборот', () => {
-    const page = new El('div');
-    page.add(pair('Средн. время перевода', '45 сек'));
-    installDom(page, '');
+  it('секунды приводит к минутам, а не берёт как есть', () => {
+    const page = el('div').add(card('Средн. время перевода', '45', 'сек'));
+    installDom(page, '', ORDER_URL);
 
-    // секунды приводятся к минутам, а не берутся как есть
-    assert.equal(scrapeCounterpartyStats()!.avgReleaseMinutes, 1);
+    assert.equal(scrape()!.avgReleaseMinutes, 1);
   });
 });

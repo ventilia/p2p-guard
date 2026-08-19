@@ -503,11 +503,10 @@ const settings: Settings = {
   // на стенде показываем подстройку под тему страницы
   theme: 'auto',
   panelPlacement: 'chat-bottom',
-  panelWidth: 384,
-  panelHeight: 340,
-  chatWidth: 0,
-  chatHeight: 0,
+  panelWidth: 720,
+  panelHeight: 720,
   templateMode: 'insert',
+  enrichFromProfile: true,
 };
 
 // состав команды для вкладки «команда» в попапе
