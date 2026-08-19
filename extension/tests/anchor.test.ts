@@ -1,54 +1,59 @@
 /**
  * Ширина блока панели на странице ордера.
  *
- * Панель — обычный элемент страницы под блоком ордера. В полосу чата она не
- * заходит: тот у биржи position:fixed и прибит к окну, поэтому любой блок в
- * его полосе при прокрутке проходит сквозь него. Отсюда единственное
- * ограничение — правый край не дальше левого края переписки.
+ * Размеры взяты с живой страницы (разведка inspect-order): контейнер 972,
+ * колонка ордера 924 от x=24, столбец чата начинается на 972.
+ *
+ * Ограничений два. За свою колонку выходить нельзя — блок подрежет первый же
+ * предок с overflow, и панели просто не видно. В полосу чата заходить нельзя —
+ * тот прибит к окну, и при прокрутке они начнут пересекаться.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { flowWidth, floatingBox } from '../src/content/anchor.js';
 
-// раскладка живой страницы: контейнер от 24, чат начинается на 1016
 const view = { width: 1440, height: 860 };
-const left = 24;
-const chatLeft = 1016;
+const column = { left: 24, width: 924 };
+const chatLeft = 972;
 
-describe('ширина блока под ордером', () => {
+describe('ширина блока в колонке ордера', () => {
   it('растягивается до заданной ширины', () => {
-    assert.equal(flowWidth(left, chatLeft, 720, view), 720);
+    assert.equal(flowWidth(column, chatLeft, 720, view), 720);
   });
 
-  it('не заходит в полосу чата', () => {
-    const width = flowWidth(left, chatLeft, 5000, view);
+  it('не выходит за свою колонку', () => {
+    const width = flowWidth(column, 5000, 5000, view);
 
-    assert.equal(left + width, chatLeft - 16);
-    assert.ok(left + width < chatLeft, 'правый край левее переписки');
+    assert.equal(width, column.width);
   });
 
-  it('широкий контейнер не отменяет ограничение', () => {
-    // контейнер тянется на всю страницу, но панель всё равно упирается в чат
-    const width = flowWidth(0, chatLeft, 5000, view);
+  it('на реальных размерах ограничителем оказывается колонка', () => {
+    const width = flowWidth(column, chatLeft, 5000, view);
 
-    assert.equal(width, chatLeft - 16);
+    // 24 + 924 = 948, до чата на 972 остаётся запас
+    assert.equal(width, column.width);
+    assert.ok(column.left + width < chatLeft, 'правый край левее переписки');
+  });
+
+  it('широкая колонка не отменяет предел по чату', () => {
+    // колонка шире, чем расстояние до чата: побеждает меньшее
+    const wide = { left: 24, width: 2000 };
+    const width = flowWidth(wide, chatLeft, 5000, view);
+
+    assert.equal(wide.left + width, chatLeft - 16);
   });
 
   it('не бывает уже минимума', () => {
-    assert.equal(flowWidth(left, chatLeft, 50, view), 320);
+    assert.equal(flowWidth(column, chatLeft, 50, view), 320);
   });
 
   it('на узкой странице остаётся читаемой ширины', () => {
-    // чат почти вплотную к краю: ужимать панель до нуля нельзя
-    const width = flowWidth(left, 200, 720, view);
-
-    assert.equal(width, 320);
+    // чат почти вплотную к колонке: ужимать панель до нуля нельзя
+    assert.equal(flowWidth(column, 200, 720, view), 320);
   });
 
-  it('без чата ограничивается шириной окна', () => {
-    const width = flowWidth(left, 0, 5000, view);
-
-    assert.equal(left + width, view.width - 16);
+  it('без чата ограничивается своей колонкой', () => {
+    assert.equal(flowWidth(column, 0, 5000, view), column.width);
   });
 });
 

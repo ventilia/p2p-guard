@@ -34,10 +34,14 @@ const CSS = `
 #pg-demo-order .ctl input { width: 90px; accent-color: #FCD535; }
 
 /* на бирже колонка ордера своей прокрутки не имеет — скроллится документ */
-#pg-demo-order .body { display: flex; align-items: flex-start; }
+/* пропорции сняты с живой страницы: контейнер 972, колонка ордера 924,
+   чат начинается на 972 и в колонку не заходит */
+#pg-demo-order .container { width: 972px; }
+#pg-demo-order .body { display: flex; align-items: flex-start; padding-left: 24px; }
 #pg-demo-order .order-col {
-  width: 588px; padding: 24px;
+  width: 924px; padding: 0 0 40px;
 }
+#pg-demo-order .order-content { width: 588px; }
 
 #pg-demo-order h2 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
 #pg-demo-order h2 b { color: #FCD535; }
@@ -126,8 +130,9 @@ const HTML = `
   <button class="close" id="pg-demo-close">Закрыть</button>
 </div>
 
+<div class="container">
 <div class="body">
-  <div class="order-col">
+  <div class="order-col"><div class="order-content">
     <h2>Переведите оплату в течение <b>20:25</b></h2>
     <div class="order-no">Номер ордера <span>22922704071463526400</span></div>
 
@@ -155,7 +160,8 @@ const HTML = `
       <span class="step-num">2</span>
       <div class="step-title">Отправить квитанцию и уведомить продавца</div>
     </div>
-  </div>
+    <div style="height:420px"></div>
+  </div></div>
 
   <div class="chat-fixed">
     <div class="chat-head">
@@ -188,6 +194,7 @@ const HTML = `
       </div>
     </div>
   </div>
+</div>
 </div>
 `;
 

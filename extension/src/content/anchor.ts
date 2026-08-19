@@ -41,23 +41,32 @@ export function findChatColumn(): HTMLElement | null {
 }
 
 /**
- * Куда встраивать блок: контейнер, который укладывает содержимое сверху вниз.
+ * Колонка с содержимым ордера — соседка чата, которая занимает место в потоке.
  *
- * Кладём панель НИЖЕ всего блока ордера, а не внутрь его колонки. Внутри
- * колонка узкая, и широкая панель вылезала бы за неё — а любой предок с
- * overflow подрезал бы её до невидимости.
+ * Кладём панель в неё, а не в контейнер под всей страницей: колонка задаёт
+ * безопасные границы. Блок, вылезший за неё, подрежет первый же предок с
+ * overflow — на бирже панели тогда просто не видно.
  */
-export function findStackParent(chat: HTMLElement): HTMLElement | null {
-  // строка с колонками: она содержит и ордер, и чат
+export function findFlowColumn(chat: HTMLElement): HTMLElement | null {
   let row: HTMLElement | null = chat.parentElement;
-  for (let depth = 0; row && depth < 8; row = row.parentElement, depth += 1) {
-    if (row.getBoundingClientRect().width >= window.innerWidth * 0.5) break;
-  }
-  if (!row) return null;
 
-  // родитель строки укладывает блоки друг под другом — там нам и место
-  const parent = row.parentElement;
-  return parent && getComputedStyle(parent).display !== 'flex' ? parent : row.parentElement;
+  for (let depth = 0; row && depth < 8; row = row.parentElement, depth += 1) {
+    if (row.getBoundingClientRect().width < window.innerWidth * 0.5) continue;
+
+    const candidates = Array.from(row.children).filter((child): child is HTMLElement => {
+      if (!(child instanceof HTMLElement)) return false;
+      if (child.contains(chat) || child.id === HOST_ID) return false;
+      return getComputedStyle(child).position !== 'fixed';
+    });
+
+    const widest = candidates.sort(
+      (a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width,
+    )[0];
+
+    if (widest && widest.getBoundingClientRect().width > 300) return widest;
+  }
+
+  return null;
 }
 
 /**
@@ -66,11 +75,17 @@ export function findStackParent(chat: HTMLElement): HTMLElement | null {
  * Растём вправо до левого края чата и ни пикселем дальше: зайдя в его полосу,
  * блок начнёт пересекаться с перепиской при каждой прокрутке.
  */
-export function flowWidth(left: number, chatLeft: number, wanted: number, view: Viewport): number {
-  // предел — левый край чата. Брать максимум с шириной контейнера нельзя:
-  // контейнер тянется на всю страницу, и такой «предел» сводил ограничение
-  // на нет — панель разъезжалась на всю ширину и лезла на переписку
-  const limit = Math.max(MIN_WIDTH, (chatLeft || view.width) - left - GAP);
+export function flowWidth(
+  column: { left: number; width: number },
+  chatLeft: number,
+  wanted: number,
+  view: Viewport,
+): number {
+  // два предела сразу: за свою колонку не вылезаем, иначе блок подрежут,
+  // и до полосы чата не доходим, иначе они встретятся при прокрутке
+  const untilChat = (chatLeft || view.width) - column.left - GAP;
+  const limit = Math.max(MIN_WIDTH, Math.min(column.width, untilChat));
+
   return Math.round(Math.min(Math.max(wanted, MIN_WIDTH), limit));
 }
 
@@ -105,14 +120,14 @@ export function computeLayout(
   const host = document.getElementById(HOST_ID);
 
   const chat = placement === 'floating' ? null : findChatColumn();
-  const column = chat ? findStackParent(chat) : null;
+  const column = chat ? findFlowColumn(chat) : null;
 
   if (!chat || !column || !host) {
     if (host) detachHost(host);
     return { mode: 'floating', box: floatingBox(panel.width, panel.height, view) };
   }
 
-  // host — последний блок страницы под ордером, дальше раскладывает браузер
+  // host — последний блок колонки ордера, дальше раскладывает браузер
   if (host.parentElement !== column) column.appendChild(host);
 
   // родитель у биржи бывает флексовым: без запрета сжатия ширину урежут
@@ -125,7 +140,12 @@ export function computeLayout(
   host.style.width = '';
   const natural = host.getBoundingClientRect();
 
-  const width = flowWidth(natural.left, chat.getBoundingClientRect().left, panel.width, view);
+  const width = flowWidth(
+    { left: natural.left, width: natural.width },
+    chat.getBoundingClientRect().left,
+    panel.width,
+    view,
+  );
   host.style.width = `${width}px`;
 
   return { mode: 'flow', maxHeight: panel.height };
