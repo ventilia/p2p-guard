@@ -181,6 +181,9 @@ export function Panel() {
       ? {
           // размеры и отступы уже на host, здесь только занять его целиком
           position: 'relative' as const,
+          // в потоке чат обязан быть сверху: при прокрутке панель уходит под
+          // него, а не накрывает переписку
+          zIndex: 1,
           top: 'auto' as const,
           left: 'auto' as const,
           right: 'auto' as const,
