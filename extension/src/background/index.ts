@@ -16,7 +16,6 @@ import {
   clearCapture,
   getSelfHint,
   recordDomSnapshot,
-  readRawUserPayloads,
   recordNetworkCapture,
   resolveManual,
   resolveOrderContext,
@@ -67,8 +66,6 @@ function dossierPath(tabId: number, counterpartyId: string): string {
 
 let ownUserNoCache: string | null = null;
 
-// ───────────────────────────── UID пользователя ─────────────────────────────
-
 // нужен, чтобы понять, кто из двух сторон ордера контрагент
 // источники по убыванию надёжности, до запроса к бирже доходит редко
 async function getOwnUserNo(tabId?: number): Promise<string | null> {
@@ -108,8 +105,6 @@ async function setOwnUserNo(uid: string): Promise<void> {
   ownUserNoCache = uid;
   await chrome.storage.local.set({ [OWN_UID_KEY]: uid });
 }
-
-// ───────────────────────────── Состояние панели ─────────────────────────────
 
 async function setPanelState(tabId: number, state: PanelState): Promise<void> {
   panelStates.set(tabId, state);
@@ -200,6 +195,7 @@ async function lookupDossier(
       maskedPhone: counterparty.maskedPhone,
       stats: counterparty.stats,
       exchangeReviews: counterparty.exchangeReviews,
+      exchangeAds: counterparty.exchangeAds,
       // ордер отправляем, только если он полноценный
       order: order?.externalId ? order : undefined,
     },
@@ -263,13 +259,7 @@ async function handleOrder(tabId: number, orderId: string): Promise<void> {
 }
 
 // перезапрос досье для вкладки с тем же ордером
-/**
- * Пересобирает досье во вкладках, где открыт этот контрагент.
- *
- * Профиль читается фоновой вкладкой уже после того, как панель показана,
- * поэтому карточку надо обновить, иначе новые поля увидят только при
- * следующем открытии ордера.
- */
+// пересобирает досье во вкладках, где открыт этот контрагент
 async function refreshOrderTabs(userNo: string): Promise<void> {
   const tabs = await chrome.tabs.query({ url: ['https://*.binance.com/*'] });
 
@@ -333,8 +323,6 @@ async function refreshDossierOnly(tabId: number): Promise<PanelState> {
   }
 }
 
-// ───────────────────────────── Синхронизация ордеров ─────────────────────────
-
 async function syncOrders(force = false): Promise<{ created: number; updated: number } | null> {
   const settings = await getSettings();
   if (!settings.autoSyncOrders && !force) return null;
@@ -383,8 +371,6 @@ async function syncOrders(force = false): Promise<{ created: number; updated: nu
     return null;
   }
 }
-
-// ───────────────────────────── Чат: реквизиты ─────────────────────────────
 
 // формат сообщений чата плавает, поэтому достаём текст мягко
 function extractChatText(payload: unknown, depth = 0): string | null {
@@ -454,8 +440,6 @@ async function handleChatPayload(tabId: number, payload: unknown): Promise<void>
   }
 }
 
-// ───────────────────────────── События браузера ─────────────────────────────
-
 function onNavigation(tabId: number, url: string | undefined): void {
   const orderId = detectOrderId(url);
 
@@ -496,8 +480,6 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SYNC_ALARM) void syncOrders();
 });
-
-// ───────────────────────────── Обработка сообщений ─────────────────────────────
 
 async function handleMessage(
   request: RuntimeRequest,
@@ -573,13 +555,10 @@ async function handleMessage(
     // сырые ответы биржи для разбора имён полей, см. orderContext
     // профиль контрагента прочитан фоновой вкладкой
     case 'PROFILE_STATS':
-      await acceptProfileStats(request.userNo, request.stats, request.reviews, tabId);
+      await acceptProfileStats(request.userNo, request.stats, request.reviews, request.ads, tabId);
       // карточка уже показана без этих полей — пересобираем её
       void refreshOrderTabs(request.userNo);
       return { ok: true, data: { ok: true } };
-
-    case 'GET_RAW_CAPTURES':
-      return { ok: true, data: { items: await readRawUserPayloads() } };
 
     // вошёл ли пользователь в Binance и тем ли аккаунтом, что привязан к учётке
     case 'GET_BINANCE_SESSION': {

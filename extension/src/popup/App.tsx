@@ -105,7 +105,8 @@ export function App() {
 
   // попап — обычная страница, Shadow DOM тут нет, тема живёт на <html>
   useEffect(() => {
-    document.documentElement.dataset.theme = settings?.theme ?? 'light';
+    // до загрузки настроек тему уже поставил main.tsx — перебивать её нечем
+    if (settings?.theme) document.documentElement.dataset.theme = settings.theme;
   }, [settings?.theme]);
 
   const patchSettings = async (patch: Partial<Settings>) => {
@@ -378,8 +379,6 @@ function TabStatus({ panelEnabled, onEnable }: { panelEnabled: boolean; onEnable
   );
 }
 
-// ───────────────────────────── Авторизация ─────────────────────────────
-
 function AuthForm({
   settings,
   onSettings,
@@ -501,9 +500,6 @@ function AuthForm({
     </>
   );
 }
-
-
-// ───────────────────────────── Оценить контрагента ─────────────────────────────
 
 // главный экран попапа: оценить того, с кем только что закрыл ордер
 function ReviewTab({
@@ -737,8 +733,6 @@ function MyReviews({ items }: { items: MyReview[] | null }) {
     </div>
   );
 }
-
-// ───────────────────────────── Команда ─────────────────────────────
 
 type TeamResponse = {
   team: { id: string; name: string; slug: string; ownerId: string };
@@ -1002,8 +996,6 @@ function TeamTab({
   );
 }
 
-// ───────────────────────────── Шаблоны ─────────────────────────────
-
 function TemplatesTab({ onError, onNotice }: { onError: (m: string) => void; onNotice: (m: string) => void }) {
   const [items, setItems] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1149,13 +1141,7 @@ function TemplatesTab({ onError, onNotice }: { onError: (m: string) => void; onN
   );
 }
 
-// ───────────────────────────── Настройки ─────────────────────────────
-
-/**
- * Ползунок размера. У размеров чата есть особое значение 0 — «не трогать
- * вёрстку биржи»; показываем его словом, а не нулём, иначе непонятно, что
- * произойдёт.
- */
+// ползунок размера
 function Slider({
   label,
   value,
@@ -1219,23 +1205,6 @@ function SettingsTab({
 }) {
   const [syncing, setSyncing] = useState(false);
   const [apiUrl, setApiUrl] = useState(settings?.apiBaseUrl ?? '');
-  const [dumped, setDumped] = useState<string | null>(null);
-
-  const dumpRaw = async () => {
-    const response = await sendMessage<{ items: unknown[] }>({ type: 'GET_RAW_CAPTURES' });
-    if (!response.ok) {
-      onError(response.error.message);
-      return;
-    }
-    const items = response.data?.items ?? [];
-    if (!items.length) {
-      onNotice('Пока пусто. Откройте ордер и дождитесь карточки контрагента.');
-      return;
-    }
-    await navigator.clipboard.writeText(JSON.stringify(items, null, 2));
-    setDumped(`Скопировано, ответов: ${items.length}`);
-    setTimeout(() => setDumped(null), 2500);
-  };
 
   const sync = async () => {
     setSyncing(true);
@@ -1362,7 +1331,7 @@ function SettingsTab({
         <div className="seg">
           {(
             [
-              ['chat-bottom', 'Под чатом'],
+              ['chat-bottom', 'В ордере'],
               ['floating', 'Свободно'],
             ] as const
           ).map(([value, label]) => (
@@ -1376,16 +1345,15 @@ function SettingsTab({
           ))}
         </div>
         <div className="d" style={{ marginTop: 6 }}>
-          «Под чатом» — отдельный блок на странице ниже переписки: вёрстку биржи не трогаем, к
-          панели просто прокручиваетесь. Она шире колонки чата и растёт влево, на свободное место
+          «В ордере» — обычный блок страницы под деталями ордера: вёрстку биржи не трогаем, к
+          панели просто прокручиваетесь. Ширина ограничена колонкой ордера, шире она не станет
         </div>
 
-        {/* нижняя граница — размер по умолчанию: сузить панель нельзя, только растянуть */}
         <Slider
           label="Ширина панели"
           value={settings?.panelWidth ?? 720}
-          min={720}
-          max={1600}
+          min={400}
+          max={1400}
           step={20}
           onChange={(panelWidth) => void onSettings({ panelWidth })}
         />
@@ -1393,8 +1361,8 @@ function SettingsTab({
         <Slider
           label="Высота панели"
           value={settings?.panelHeight ?? 720}
-          min={720}
-          max={2000}
+          min={300}
+          max={1600}
           step={20}
           onChange={(panelHeight) => void onSettings({ panelHeight })}
         />
@@ -1436,20 +1404,6 @@ function SettingsTab({
       <button className="btn block" disabled={syncing} onClick={() => void sync()}>
         <IconRefresh size={14} /> {syncing ? 'Синхронизация…' : 'Синхронизировать ордера'}
       </button>
-
-      {/* временно: имена полей в ответах C2C API не документированы, и подобрать
-          их снаружи не вышло. Кнопка отдаёт сырой ответ, который расширение уже
-          поймало на странице ордера */}
-      <div className="card">
-        <div className="card-title">Диагностика</div>
-        <div className="d">
-          Откройте ордер, дождитесь карточки контрагента и нажмите кнопку — сырой ответ
-          Binance ляжет в буфер обмена. Куки и подписи из него вырезаны.
-        </div>
-        <button className="btn block" style={{ marginTop: 8 }} onClick={() => void dumpRaw()}>
-          {dumped ?? 'Скопировать ответ биржи'}
-        </button>
-      </div>
 
       {/* шаблоны нужны реже остального, поэтому свёрнуты: команда теперь
           отдельной вкладкой, её искать в настройках было негде */}

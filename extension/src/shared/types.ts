@@ -124,6 +124,7 @@ export type CounterpartySnapshot = {
   maskedPhone?: string;
   stats?: ExchangeStats;
   exchangeReviews?: ExchangeReview[];
+  exchangeAds?: ExchangeAd[];
 };
 
 // что удалось прочитать прямо со страницы, запасной источник
@@ -159,6 +160,8 @@ export type Dossier = {
   exchangeStats: ExchangeStats;
   // отзывы самой биржи, показываем отдельно от наших
   exchangeReviews: ExchangeReview[];
+  // активные объявления контрагента
+  exchangeAds: ExchangeAd[];
   blacklist: {
     id: string;
     scope: 'GLOBAL' | 'TEAM';
@@ -245,3 +248,14 @@ export type PanelState =
       // реквизиты, замеченные в чате после открытия карточки
       requisiteAlert?: { value: string; type: RequisiteType } | null;
     };
+
+// активное объявление контрагента на бирже
+export type ExchangeAd = {
+  side: OrderSide;
+  asset: string | null;
+  price: number | null;
+  fiat: string | null;
+  minFiat: number | null;
+  maxFiat: number | null;
+  methods: string[];
+};

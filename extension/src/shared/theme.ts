@@ -3,8 +3,8 @@
 
 export type ThemeName = 'light' | 'dark' | 'auto';
 
-// IBM Plex Sans (SIL OFL 1.1), вариативный — жирный не подделывается браузером
-// URL подставляется на месте: chrome-extension:// в панели, обычный путь в попапе
+// iBM Plex Sans (SIL OFL 1.1), вариативный — жирный не подделывается браузером
+// uRL подставляется на месте: chrome-extension:// в панели, обычный путь в попапе
 export const fontFace = (url: string): string => `
 @font-face {
   font-family: 'IBM Plex Sans';

@@ -1,7 +1,14 @@
 // импортируется первым, чтобы к моменту работы Panel глобальный chrome уже был
 // отвечает на те же сообщения, что и service worker, состояние держит в памяти
 import { fixture } from './fixture';
-import type { MessageTemplate, PanelState, Session, Settings } from '../src/shared/types.js';
+import type {
+  MessageTemplate,
+  PanelState,
+  ReviewRating,
+  ReviewTag,
+  Session,
+  Settings,
+} from '../src/shared/types.js';
 
 type Listener = (message: unknown) => void;
 
@@ -28,8 +35,6 @@ function patchDossier(mutate: (d: PanelState & { status: 'ready' }) => void): Pa
 
 const nowIso = () => new Date().toISOString();
 const newId = () => `demo-${Math.random().toString(36).slice(2, 10)}`;
-
-// ───────────────────────── Сессия биржи ─────────────────────────
 
 type BinanceSessionMock = {
   loggedIn: boolean;
@@ -104,17 +109,20 @@ async function handle(request: Record<string, unknown>): Promise<unknown> {
 
     case 'SUBMIT_REVIEW': {
       const next = patchDossier((state) => {
-        const rating = request.rating as 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
+        const rating = request.rating as ReviewRating;
+        const tag = request.tag as ReviewTag;
         const text = request.text as string;
         const own = state.dossier.reviews.find((r) => r.isOwn);
         if (own) {
           own.rating = rating;
+          own.tag = tag;
           own.text = text;
           own.createdAt = nowIso();
         } else {
           state.dossier.reviews.unshift({
             id: newId(),
             rating,
+            tag,
             text,
             createdAt: nowIso(),
             author: 'Ваш отзыв',

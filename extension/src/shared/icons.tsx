@@ -244,8 +244,6 @@ export const IconArrowLeft = (p: IconProps) => (
   </Svg>
 );
 
-// ───────────────────────────── Иконки категорий жалоб ─────────────────────────
-
 // мошенник
 const IconMask = (p: IconProps) => (
   <Svg {...p}>

@@ -73,7 +73,7 @@ async function issueTokens(
     accessToken,
     refreshToken,
     refreshTokenId: stored.id,
-    // TTL из той же настройки, которой подписан JWT, иначе клиент промахнётся
+    // tTL из той же настройки, которой подписан JWT, иначе клиент промахнётся
     expiresIn: parseDurationSeconds(env.ACCESS_TOKEN_TTL),
   };
 }

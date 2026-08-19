@@ -52,6 +52,19 @@ const exchangeReviewSchema = z.object({
 
 export type ExchangeReviewSnapshot = z.infer<typeof exchangeReviewSchema>;
 
+// активные объявления контрагента: цена, лимиты и способы оплаты
+const exchangeAdSchema = z.object({
+  side: z.enum(['BUY', 'SELL']),
+  asset: z.string().max(16).nullish(),
+  price: z.number().nonnegative().nullish(),
+  fiat: z.string().max(8).nullish(),
+  minFiat: z.number().nonnegative().nullish(),
+  maxFiat: z.number().nonnegative().nullish(),
+  methods: z.array(z.string().max(48)).max(8).default([]),
+});
+
+export type ExchangeAdSnapshot = z.infer<typeof exchangeAdSchema>;
+
 const orderSnapshotSchema = z.object({
   externalId: z.string().trim().min(1).max(64),
   side: z.enum(['BUY', 'SELL']),
@@ -72,6 +85,7 @@ const lookupSchema = z.object({
   maskedPhone: z.string().trim().max(32).optional(),
   stats: statsSchema.optional(),
   exchangeReviews: z.array(exchangeReviewSchema).max(50).optional(),
+  exchangeAds: z.array(exchangeAdSchema).max(20).optional(),
   order: orderSnapshotSchema.optional(),
 });
 
@@ -308,6 +322,7 @@ export async function buildDossier(
     risk,
     exchangeStats: stats,
     exchangeReviews: (counterparty.exchangeReviews ?? []) as ExchangeReviewSnapshot[],
+    exchangeAds: (counterparty.exchangeAds ?? []) as ExchangeAdSnapshot[],
     statsSource,
     statsUpdatedAt: counterparty.statsUpdatedAt,
     blacklist: blacklist.map((b) => ({
@@ -379,14 +394,7 @@ export async function buildDossier(
 
 export type Dossier = Awaited<ReturnType<typeof buildDossier>>;
 
-/**
- * Слияние снимков статистики.
- *
- * Заменять снимок целиком нельзя: расширение присылает то, что смогло достать
- * на этот раз, и после перезагрузки страницы перехват может не сработать. Тогда
- * полный профиль затирался бы огрызком, данные пропадали, а риск-скор
- * пересчитывался по обеднённым цифрам.
- */
+// слияние снимков статистики
 function mergeStats(
   previous: ExchangeStatsSnapshot | null,
   incoming: ExchangeStatsSnapshot | undefined,
@@ -427,9 +435,12 @@ export async function upsertCounterparty(input: z.infer<typeof lookupSchema>) {
     ...(stats.changed
       ? { exchangeStats: stats.value as Prisma.InputJsonValue, statsUpdatedAt: now }
       : {}),
-    // пустой список — «не смогли прочитать», прошлые отзывы не стираем
+    // пустой список — «не смогли прочитать», прошлое не стираем
     ...(input.exchangeReviews?.length
       ? { exchangeReviews: input.exchangeReviews as unknown as Prisma.InputJsonValue }
+      : {}),
+    ...(input.exchangeAds?.length
+      ? { exchangeAds: input.exchangeAds as unknown as Prisma.InputJsonValue }
       : {}),
   };
 
@@ -522,7 +533,7 @@ export async function counterpartyRoutes(app: FastifyInstance): Promise<void> {
     const digits = normalizeDigits(q);
 
     // порядок обязателен: без него срез отдавал случайные связки, и свежий
-    // владелец карты мог не попасть в выборку, хотя искали именно его.
+    // владелец карты мог не попасть в выборку, хотя искали именно его
     // берём с запасом — у одного контрагента бывает несколько реквизитов
     const byRequisite = digits.length >= 6
       ? await prisma.counterpartyRequisite.findMany({

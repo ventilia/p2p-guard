@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   panelEnabled: false,
   autoSyncOrders: true,
   captureChatRequisites: true,
-  theme: 'light',
+  theme: 'auto',
   panelPlacement: 'chat-bottom',
   panelWidth: 720,
   panelHeight: 720,

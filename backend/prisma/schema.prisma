@@ -206,6 +206,8 @@ model Counterparty {
   exchangeStats  Json?
   /// отзывы с самой биржи, снимок вкладки «Обратная связь»
   exchangeReviews Json?
+  /// активные объявления контрагента
+  exchangeAds     Json?
   statsUpdatedAt  DateTime?
 
   firstSeenAt DateTime @default(now())

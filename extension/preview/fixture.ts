@@ -1,16 +1,10 @@
-// риск-баллы здесь ровно те, что вернёт backend/src/lib/risk.ts на этих данных,
-// иначе стенд показывал бы не то, что покажет продукт
-// мошенник: 70 ЧС + 45 реквизит + 40 тяжёлые жалобы + 28 негатив + 11 completion
-//           + 8 медленный перевод → clamp(100) → CRITICAL
-// чистый: −20 только позитив − 15 история с командой → clamp(0) → LOW
+// риск-баллы здесь ровно те, что вернёт backend/src/lib/risk.ts на этих данных
 import type { Dossier, MessageTemplate, PanelState, Session, Settings } from '../src/shared/types.js';
 
 const daysAgo = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
 const zero = { PENDING: 0, PAID: 0, COMPLETED: 0, CANCELLED: 0, APPEALING: 0, UNKNOWN: 0 };
-
-// ───────────────────────────── Мошенник ─────────────────────────────
 
 const scamDossier: Dossier = {
   counterparty: {
@@ -94,6 +88,26 @@ const scamDossier: Dossier = {
       text: 'Всё прошло нормально, быстро.',
       author: 'usdt_hunter',
       createdAt: '2026-07-11T11:02:00.000Z',
+    },
+  ],
+  exchangeAds: [
+    {
+      side: 'SELL',
+      asset: 'USDT',
+      price: 552.4,
+      fiat: 'KZT',
+      minFiat: 50_000,
+      maxFiat: 1_200_000,
+      methods: ['Kaspi Bank', 'Halyk Bank'],
+    },
+    {
+      side: 'BUY',
+      asset: 'USDT',
+      price: 546.1,
+      fiat: 'KZT',
+      minFiat: 100_000,
+      maxFiat: 4_000_000,
+      methods: ['Kaspi Bank'],
     },
   ],
   blacklist: [
@@ -281,8 +295,6 @@ const scamDossier: Dossier = {
   ],
 };
 
-// ───────────────────────────── Чистый контрагент ─────────────────────────────
-
 const cleanDossier: Dossier = {
   counterparty: {
     id: 'cp-demo-clean',
@@ -345,6 +357,17 @@ const cleanDossier: Dossier = {
       text: 'Работаем не первый раз, всё чётко.',
       author: 'shymkent_ex',
       createdAt: '2026-08-05T13:55:00.000Z',
+    },
+  ],
+  exchangeAds: [
+    {
+      side: 'SELL',
+      asset: 'USDT',
+      price: 549.9,
+      fiat: 'KZT',
+      minFiat: 30_000,
+      maxFiat: 600_000,
+      methods: ['Kaspi Bank'],
     },
   ],
   blacklist: [],
@@ -449,8 +472,6 @@ const cleanDossier: Dossier = {
     },
   ],
 };
-
-// ───────────────────────────── Прочее ─────────────────────────────
 
 const templates: MessageTemplate[] = [
   { id: 't-1', title: 'Реквизиты', body: 'Отправьте, пожалуйста, реквизиты для перевода.', position: 0, shared: true, canEdit: true },

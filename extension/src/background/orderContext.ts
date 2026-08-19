@@ -33,57 +33,6 @@ type TabCapture = {
 
 const captures = new Map<number, TabCapture>();
 
-/**
- * Сырые ответы биржи, в которых нашёлся профиль контрагента.
- *
- * Имена полей у C2C API не документированы, и подобрать их снаружи не вышло:
- * на прямые запросы биржа отвечает отказом, а в перехвате из всего профиля
- * узнаются два-три поля. Поэтому храним исходный ответ и отдаём его наружу —
- * по нему видно точные имена, и гадать больше не нужно.
- *
- * Секреты вырезаны, объём ограничен: это диагностика, а не архив.
- */
-const RAW_KEY = 'pg.rawUserPayloads';
-const RAW_LIMIT = 6;
-
-const SECRET_FIELD = /token|auth|cookie|secret|signature|session|password|jwt|csrf|device|fvideo/i;
-
-function stripSecrets(value: unknown, depth = 0): unknown {
-  if (depth > 8) return '…';
-  if (value === null || typeof value !== 'object') {
-    return typeof value === 'string' && value.length > 300 ? `${value.slice(0, 300)}…` : value;
-  }
-  if (Array.isArray(value)) return value.slice(0, 5).map((v) => stripSecrets(v, depth + 1));
-
-  const out: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = SECRET_FIELD.test(key) ? '‹вырезано›' : stripSecrets(item, depth + 1);
-  }
-  return out;
-}
-
-function keepRawUserPayload(payload: unknown): void {
-  void (async () => {
-    try {
-      const stored = await chrome.storage.local.get(RAW_KEY);
-      const list = (stored[RAW_KEY] as unknown[] | undefined) ?? [];
-      list.unshift({ at: new Date().toISOString(), payload: stripSecrets(payload) });
-      await chrome.storage.local.set({ [RAW_KEY]: list.slice(0, RAW_LIMIT) });
-    } catch {
-      // диагностика не должна мешать основной работе
-    }
-  })();
-}
-
-export async function readRawUserPayloads(): Promise<unknown[]> {
-  try {
-    const stored = await chrome.storage.local.get(RAW_KEY);
-    return (stored[RAW_KEY] as unknown[] | undefined) ?? [];
-  } catch {
-    return [];
-  }
-}
-
 // разрешаются, как только нужный ордер появится в перехвате
 const waiters = new Map<number, { orderId: string; resolve: () => void }[]>();
 
@@ -117,9 +66,6 @@ export function recordNetworkCapture(
 ): void {
   const parsed = extractFromPayload(payload, selfUserNo);
   if (!parsed.order && !parsed.users.length) return;
-
-  // профиль встретился — сохраняем ответ целиком, чтобы разобрать имена полей
-  if (parsed.users.length) keepRawUserPayload(payload);
 
   const capture = getCapture(tabId);
   capture.updatedAt = Date.now();
@@ -241,15 +187,17 @@ async function enrich(
   const cached = await readProfileStats(result.externalId);
   if (cached) {
     result = { ...result, stats: fill(result.stats, cached.stats) };
-    // отзывы биржи есть только в профиле, из ордера их не видно
+    // отзывы и объявления есть только в профиле, из ордера их не видно
     if (cached.reviews?.length && !result.exchangeReviews?.length) {
       result = { ...result, exchangeReviews: cached.reviews };
     }
+    if (cached.ads?.length) result = { ...result, exchangeAds: cached.ads };
   }
 
   // за недостающим идём фоновой вкладкой и НЕ ждём её: панель должна
   // появиться сразу, поля дозаполнятся, когда страница отчитается
-  if (needsProfile(result.stats)) {
+  // без кэша идём всегда: объявлений и отзывов биржи в ордере нет вовсе
+  if (!cached || needsProfile(result.stats)) {
     void getSettings().then(({ enrichFromProfile }) => {
       if (enrichFromProfile) void startProfileProbe(result.externalId);
     });

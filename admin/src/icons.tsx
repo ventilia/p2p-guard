@@ -1,4 +1,4 @@
-/** Иконки админки — инлайновые SVG, наследуют цвет текста. */
+// иконки админки — инлайновые SVG, наследуют цвет текста
 import type { SVGProps } from 'react';
 
 type IconProps = { size?: number } & Omit<SVGProps<SVGSVGElement>, 'width' | 'height'>;

@@ -1,7 +1,4 @@
-/**
- * Извлечение реквизитов из чата. Правило: лучше пропустить сомнительное,
- * чем засорить общую базу мусором.
- */
+// извлечение реквизитов из чата: лучше пропустить сомнительное, чем выдумать
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { extractRequisites, isValidCard } from '../src/shared/parse.js';

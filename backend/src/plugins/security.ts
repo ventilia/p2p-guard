@@ -43,14 +43,7 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
   });
 }
 
-/**
- * Ответ на превышение лимита.
- *
- * @fastify/rate-limit делает throw ровно тем, что вернёт билдер (index.js:333).
- * Простой объект летел мимо обработчика ошибок как исключение без statusCode,
- * и вместо 429 клиент получал 500 «Внутренняя ошибка сервера» — расширение
- * разбирает code и показывало пользователю не то. AppError обработчик знает.
- */
+// ответ на превышение лимита
 export const rateLimitError = () =>
   new AppError(429, 'RATE_LIMITED', 'Слишком много запросов, попробуйте позже');
 

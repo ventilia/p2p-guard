@@ -274,8 +274,6 @@ export function UserCard({ id }: { id: string }) {
   );
 }
 
-// ───────────────────────────── Модалки ─────────────────────────────
-
 type EditBody = { role?: string; teamId?: string | null; nickname?: string | null; password?: string };
 
 function EditUserModal({

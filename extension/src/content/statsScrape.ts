@@ -1,13 +1,8 @@
-// статистика контрагента из вёрстки Binance
-//
-// приватный C2C API отбивает прямые запросы антифродом, а имена полей в
-// перехваченных ответах не документированы. Зато биржа сама рисует все цифры:
-// часть — рядом с чатом в ордере, остальное — на странице профиля.
-//
-// Опираемся на подписи и на форму значения, а не на классы: подписи биржа
-// меняет реже, а классы у неё генерируемые (css-vurnku, bn-flex и подобные).
+// статистика контрагента из вёрстки: приватный API отбивает прямые запросы,
+// зато биржа рисует все цифры сама
+// опираемся на подписи и форму значения, а не на классы — они генерируемые
 
-import type { ExchangeReview, ExchangeStats } from '../shared/types.js';
+import type { ExchangeAd, ExchangeReview, ExchangeStats, OrderSide } from '../shared/types.js';
 
 // «6.94», «98.90», «1 234,56» — значение всегда лежит отдельным узлом
 const PURE_NUMBER = /^[\d\u00a0 .,]+$/;
@@ -43,13 +38,7 @@ function leaves(root: Element): Element[] {
   return out;
 }
 
-/**
- * Значение, относящееся к подписи.
- *
- * Подпись и число лежат в разных ветках карточки, поэтому поднимаемся вверх и
- * ищем лист, ВЕСЬ текст которого — число. Так мимо проходят подсказки вроде
- * «за последние 30 дней»: цифры там есть, но узел не числовой.
- */
+// значение, относящееся к подписи
 function valueFor(label: Element): { value: string; unit: string } | null {
   let node: Element | null = label.parentElement;
 
@@ -119,11 +108,7 @@ export function profileUserNo(): string | null {
   return /(?:advertiserNo|userNo)=([A-Za-z0-9]{8,64})/.exec(location.href)?.[1] ?? null;
 }
 
-/**
- * Читает всё, что биржа нарисовала на текущей странице.
- * Возвращает только распознанное: пустые поля не затирают данные из других
- * источников.
- */
+// читает всё, что биржа нарисовала на текущей странице
 export function scrapeCounterpartyStats(): ExchangeStats | null {
   const stats: ExchangeStats = {};
   const profile = onProfilePage();
@@ -170,8 +155,6 @@ export function scrapeCounterpartyStats(): ExchangeStats | null {
   return Object.keys(stats).length ? stats : null;
 }
 
-// ───────────────────────────── Отзывы биржи ─────────────────────────────
-
 // вкладка отзывов закрыта: пока по ней не кликнешь, списка в DOM нет
 export function openReviewsTab(): boolean {
   const tab =
@@ -189,12 +172,7 @@ const POSITIVE = /положительн|нравится|good|positive/i;
 const NEGATIVE = /отрицательн|не нравится|bad|negative/i;
 const REVIEW_DATE = /(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}))?/;
 
-/**
- * Отзывы из открытой вкладки «Обратная связь».
- *
- * Разметку списка разведка не показала, поэтому ищем по форме: блок, где рядом
- * стоят оценка и дата. Что не распозналось — просто не попадёт в список.
- */
+// отзывы из открытой вкладки «Обратная связь»
 export function scrapeExchangeReviews(): ExchangeReview[] {
   const out: ExchangeReview[] = [];
   const seen = new Set<string>();
@@ -230,6 +208,82 @@ export function scrapeExchangeReviews(): ExchangeReview[] {
     });
 
     if (out.length >= 20) break;
+  }
+
+  return out;
+}
+
+// заголовки над списками объявлений на странице профиля
+const ADS_BUY = /активные объявления на покупку|buy ads/i;
+const ADS_SELL = /активные объявления на продажу|sell ads/i;
+
+// тикер актива, а не код валюты: иначе KZT или RUB попадут в колонку «актив»
+const ASSETS = /^(USDT|USDC|FDUSD|BTC|ETH|BNB|DAI|TUSD|XRP|SOL)$/;
+const METHODS = /bank|kaspi|сбер|тинькоф|каспи|halyk|jusan|freedom|альфа|райф|мир/i;
+
+// «552.00 KZT», «USDT», «Kaspi Bank» — карточка объявления собирается из листьев
+function adFrom(node: Element, side: OrderSide): ExchangeAd | null {
+  const texts = leaves(node)
+    .map((el) => (el.textContent ?? '').trim())
+    .filter(Boolean);
+
+  const asset = texts.find((t) => ASSETS.test(t)) ?? null;
+  const priceIndex = texts.findIndex((t) => PURE_NUMBER.test(t) && /\d/.test(t));
+  const price = priceIndex < 0 ? null : (toNumber(texts[priceIndex]) ?? null);
+  const fiat = priceIndex < 0 ? null : (texts[priceIndex + 1]?.match(/^[A-Z]{3}$/)?.[0] ?? null);
+
+  // лимиты идут парой чисел после подписи «Лимит ордера»
+  const limitAt = texts.findIndex((t) => /лимит ордера|order limit/i.test(t));
+  const limits =
+    limitAt < 0
+      ? []
+      : texts
+          .slice(limitAt + 1, limitAt + 8)
+          .map(toNumber)
+          .filter((n): n is number => n !== undefined);
+
+  const methods = texts.filter((t) => METHODS.test(t)).slice(0, 4);
+
+  // без цены это не карточка объявления, а соседний блок вёрстки
+  if (price === null) return null;
+
+  return {
+    side,
+    asset,
+    price,
+    fiat,
+    minFiat: limits[0] ?? null,
+    maxFiat: limits[1] ?? null,
+    methods,
+  };
+}
+
+// объявления контрагента: цена, лимиты и способы оплаты
+export function scrapeExchangeAds(): ExchangeAd[] {
+  const out: ExchangeAd[] = [];
+
+  for (const heading of Array.from(document.querySelectorAll<HTMLElement>('div, h2, h3, h4'))) {
+    if (heading.children.length) continue;
+
+    const text = (heading.textContent ?? '').trim();
+    const side: OrderSide | null = ADS_BUY.test(text) ? 'BUY' : ADS_SELL.test(text) ? 'SELL' : null;
+    if (!side) continue;
+
+    // список идёт следом за заголовком, внутри общего блока
+    const section = heading.parentElement;
+    if (!section) continue;
+
+    // обход ограничен: на профиле тысячи узлов, а объявлений единицы
+    for (const row of Array.from(section.querySelectorAll<HTMLElement>('div')).slice(0, 400)) {
+      if (row.children.length < 2 || row.children.length > 12) continue;
+
+      const ad = adFrom(row, side);
+      if (!ad) continue;
+
+      const same = out.some((x) => x.side === ad.side && x.price === ad.price && x.asset === ad.asset);
+      if (!same) out.push(ad);
+      if (out.length >= 10) return out;
+    }
   }
 
   return out;

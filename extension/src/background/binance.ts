@@ -1,6 +1,5 @@
-// приватный C2C API не документирован, поэтому на угаданные пути не полагаемся:
-// сначала перехват ответов страницы, потом свой запрос, потом разбор DOM
-// всё идёт под сессией пользователя, cookie наружу не уходит
+// приватный C2C API не документирован: сначала перехват ответов страницы, потом
+// свой запрос, потом разбор DOM — всё под сессией пользователя
 import type {
   CounterpartySnapshot,
   ExchangeReview,
@@ -82,12 +81,7 @@ async function binanceCookies(): Promise<chrome.cookies.Cookie[]> {
   }
 }
 
-/**
- * UID пользователя прямо из куки: значение p20t выглядит как
- * `web.540652971.<хэш>`, то есть номер аккаунта лежит вторым сегментом.
- * Раньше за ним ходили запросом, и на медленной сети попап успевал показать
- * «не удалось определить UID» — теперь сеть для этого не нужна вовсе.
- */
+// UID пользователя прямо из куки p20t
 export async function readOwnUidFromCookies(): Promise<string | null> {
   const cookies = await binanceCookies();
   for (const name of UID_COOKIES) {
@@ -353,8 +347,6 @@ async function post<T>(kind: EndpointKind, payload: Record<string, unknown>): Pr
   throw lastError ?? new BinanceApiError('BINANCE_UNREACHABLE', 'Binance недоступен');
 }
 
-// ───────────────────────────── Разбор URL ─────────────────────────────
-
 const ORDER_ID_RE = /(?:orderNo|orderNumber|adOrderNo|orderId)=(\d{6,32})/i;
 
 // номер ордера из URL: query, хэш SPA-роутера или длинное число в пути
@@ -375,8 +367,6 @@ export function detectOrderId(url: string | undefined): string | null {
     return null;
   }
 }
-
-// ───────────────────────────── Распознавание данных ─────────────────────────
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -444,8 +434,6 @@ export const looksLikeUser = (obj: Record<string, unknown>): boolean =>
 export const looksLikeFeedback = (obj: Record<string, unknown>): boolean =>
   hasAny(obj, ['appraiseType', 'feedbackType', 'positiveOrNegative', 'appraise']) &&
   hasAny(obj, ['content', 'remark', 'appraiseContent', 'authorNickName', 'nickName', 'createTime']);
-
-// ───────────────────────────── Нормализация ─────────────────────────────
 
 // числовые коды сверены с поведением страницы, строковые — с документацией C2C
 const NUMERIC_STATUS: Record<number, OrderStatus> = {
@@ -648,8 +636,7 @@ export function normalizeUserDetail(raw: Record<string, unknown>): CounterpartyS
 
   const registerTime = toNumber(pick(detail, ['registerTime', 'registerDate', 'createTime']));
 
-  // страна регистрации аккаунта — только со слов биржи. По телефону её не
-  // угадываем: номер может быть чужой страны, а поле подписано как «регистрация»
+  // страну берём только со слов биржи: по номеру телефона её не угадываем
   const kycCountry = toCountry(
     pick(detail, [
       'kycCountryCode',
@@ -750,8 +737,6 @@ export function extractFromPayload(
       .filter((u): u is CounterpartySnapshot => u !== null),
   };
 }
-
-// ───────────────────────────── Активные вызовы ─────────────────────────────
 
 export async function fetchOrderDetail(orderNo: string): Promise<Record<string, unknown>> {
   const raw = await post<unknown>('orderDetail', { adOrderNo: orderNo, orderNo, orderNumber: orderNo });

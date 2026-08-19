@@ -79,8 +79,6 @@
     post('NET_CAPTURE', { url, method, headers, requestBody, responseBody });
   };
 
-  // ───────────────────────────── fetch ─────────────────────────────
-
   const nativeFetch = window.fetch;
   if (typeof nativeFetch === 'function') {
     window.fetch = async function patchedFetch(
@@ -114,8 +112,6 @@
       return response;
     };
   }
-
-  // ───────────────────────────── XMLHttpRequest ─────────────────────────────
 
   type Tracked = XMLHttpRequest & {
     __pgUrl?: string;
@@ -178,8 +174,6 @@
     return nativeSend.call(this, body ?? null);
   };
 
-  // ───────────────────────────── WebSocket (чат) ─────────────────────────────
-
   const NativeWebSocket = window.WebSocket;
   if (NativeWebSocket) {
     const HookedWebSocket = new Proxy(NativeWebSocket, {
@@ -195,8 +189,6 @@
     });
     window.WebSocket = HookedWebSocket as unknown as typeof WebSocket;
   }
-
-  // ───────────────────────────── SPA-навигация ─────────────────────────────
 
   const notifyUrl = () => post('URL_CHANGED', { url: window.location.href });
 

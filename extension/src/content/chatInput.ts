@@ -1,7 +1,5 @@
 // вставка текста в поле чата Binance
-// на живой странице поле — textarea.bn-textarea-input с placeholder
-// «Введите сообщение здесь», но вёрстка биржи меняется, поэтому известный
-// селектор идёт первым, а следом та же эвристика, что и раньше
+// известный селектор идёт первым, следом эвристика — вёрстка биржи меняется
 
 type Candidate = { el: HTMLElement; score: number };
 
@@ -65,11 +63,7 @@ export function findChatInput(): HTMLElement | null {
   return candidates[0]?.el ?? null;
 }
 
-/**
- * React держит значение в своём состоянии и игнорирует прямую запись в value,
- * поэтому пишем через нативный сеттер и сами шлём input — только так фреймворк
- * увидит изменение и кнопка отправки станет активной.
- */
+// React игнорирует прямую запись в value, поэтому зовём нативный сеттер
 function setNativeValue(el: HTMLTextAreaElement | HTMLInputElement, value: string): void {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
@@ -141,15 +135,7 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 export type InsertResult = 'inserted' | 'sent' | 'not-sent' | null;
 
-/**
- * Вставка шаблона в чат биржи.
- *
- * При send=true результат проверяется по факту: после отправки Binance очищает
- * поле, поэтому непустое поле означает, что сообщение не ушло. Возвращать
- * «отправлено» сразу нельзя — трейдер решит, что контрагент уже всё получил.
- * Если отправить не вышло, в поле остаётся и прежний черновик, и шаблон, чтобы
- * ничего не потерялось и можно было дослать вручную.
- */
+// вставка шаблона в чат биржи
 export async function insertIntoChat(text: string, send = false): Promise<InsertResult> {
   const el = findChatInput();
   if (!el) return null;

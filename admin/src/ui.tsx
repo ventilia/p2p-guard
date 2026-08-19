@@ -2,8 +2,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ApiError } from './api';
 
-// ───────────────────────────── Форматирование ─────────────────────────────
-
 export const fmtInt = (value: number | null | undefined): string =>
   value === null || value === undefined ? '—' : value.toLocaleString('ru-RU');
 
@@ -31,8 +29,6 @@ export const fmtDateOnly = (iso: string | null | undefined): string =>
 
 export const errText = (err: unknown): string =>
   err instanceof ApiError ? err.message : err instanceof Error ? err.message : 'Неизвестная ошибка';
-
-// ───────────────────────────── Загрузка данных ─────────────────────────────
 
 export type AsyncState<T> = {
   data: T | null;
@@ -74,8 +70,6 @@ export function useAsync<T>(fetcher: () => Promise<T>, deps: unknown[]): AsyncSt
 
   return { data, loading, error, reload };
 }
-
-// ───────────────────────────── Компоненты ─────────────────────────────
 
 export function ErrorBox({ message, onClose }: { message: string | null; onClose?: () => void }) {
   if (!message) return null;
@@ -128,7 +122,7 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
 }) {
-  // Esc закрывает, привычка любого админ-интерфейса
+  // esc закрывает, привычка любого админ-интерфейса
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();

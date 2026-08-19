@@ -176,8 +176,6 @@ if (panelHost) {
   });
 }
 
-// ───────────────────────── Демо страницы ордера ─────────────────────────
-
 // вторая копия панели — уже без правок позиционирования, ровно как в проде:
 // так на стенде работает настоящая привязка к чату, а не её имитация
 let demoPanel: ReturnType<typeof createRoot> | null = null;
@@ -246,7 +244,7 @@ function remountPopup(): void {
 
 const popupHost = document.getElementById('popup-host');
 if (popupHost) {
-  mountInShadow(popupHost, popupStyles(__FONT_URL__) + POPUP_OVERRIDE, (container) => {
+  mountInShadow(popupHost, popupStyles(__FONT_URL__, '.popup-shell') + POPUP_OVERRIDE, (container) => {
     container.className = 'popup-shell';
     container.dataset.theme = 'light';
     popupRoot = createRoot(container);

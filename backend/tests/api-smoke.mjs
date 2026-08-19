@@ -47,7 +47,6 @@ function section(title) {
   console.log(`\n${title}`);
 }
 
-// ───────────────────────────── Авторизация ─────────────────────────────
 
 section('Авторизация');
 
@@ -77,7 +76,6 @@ const badLogin = await call('/auth/login', {
 });
 check('неверный пароль → 401', badLogin.status === 401, badLogin.json);
 
-// ───────────────────────────── Команды и токены ─────────────────────────────
 
 section('Команды и токены доступа');
 
@@ -138,7 +136,6 @@ check(
   mismatch.json,
 );
 
-// ───────────────────────────── Досье ─────────────────────────────
 
 section('Досье контрагента');
 
@@ -327,7 +324,6 @@ check(
   foreignDossier.reviews?.length,
 );
 
-// ─────────────────── Статистика биржи не должна теряться ───────────────────
 
 section('Сохранность статистики');
 
@@ -394,7 +390,6 @@ check(
   { avg: bare.json.exchangeStats?.avgAmountFiat, src: bare.json.statsSource },
 );
 
-// ───────────────────────────── Отзывы биржи ─────────────────────────────
 
 section('Отзывы с самой биржи');
 
@@ -441,7 +436,6 @@ check(
   withoutExchangeReviews.json.reviews?.[0]?.author,
 );
 
-// ───────────────────────────── Теги жалоб ─────────────────────────────
 
 section('Категории жалоб');
 
@@ -499,7 +493,6 @@ check(
   withoutOrder.risk?.factors?.map((f) => f.code),
 );
 
-// ───────────────────────────── Вступление в команду ─────────────────────────
 
 section('Вступление в команду');
 
@@ -613,7 +606,6 @@ check(
   (await call('/teams/me/invites', { method: 'POST', ...S, body: { maxUses: 1 } })).status === 200,
 );
 
-// ───────────────────────────── Ордера ─────────────────────────────
 
 section('Синхронизация ордеров');
 
@@ -653,7 +645,6 @@ const foreignSync = await call('/orders/sync', {
 });
 check('чужие ордера пропускаются', foreignSync.json.skipped === 1, foreignSync.json);
 
-// ───────────────────────────── Поиск ─────────────────────────────
 
 section('Поиск');
 
@@ -671,7 +662,6 @@ check(
   searchByCard.json.items?.slice(0, 2),
 );
 
-// ───────────────────────────── Команда и админка ─────────────────────────────
 
 section('Команда и админка');
 
@@ -740,7 +730,6 @@ await call(`/admin/users/${trader.json.user.id}/subscription`, {
   body: { action: 'set', plan: 'FREE' },
 });
 
-// ───────────────────────────── Сессии ─────────────────────────────
 
 section('Сессии');
 
@@ -770,7 +759,6 @@ const afterReuse = await call('/auth/refresh', {
 });
 check('вся семья токенов отозвана', afterReuse.status === 401, afterReuse.json);
 
-// ───────────────────────────── Права ─────────────────────────────
 
 section('Права доступа');
 

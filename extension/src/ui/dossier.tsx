@@ -63,8 +63,6 @@ export type DossierActions = {
   onUseTemplate?: (body: string) => Promise<TemplateResult>;
 };
 
-// ───────────────────────────── Мелочи ─────────────────────────────
-
 // биржа фото не отдаёт, а рисовать несуществующее лицо нечестно
 export function Avatar({ nickname, uid, size = 40 }: { nickname: string | null; uid: string; size?: number }) {
   const letter = initialOf(nickname, uid);
@@ -74,8 +72,6 @@ export function Avatar({ nickname, uid, size = 40 }: { nickname: string | null; 
     </div>
   );
 }
-
-// ───────────────────────────── Риск ─────────────────────────────
 
 export function RiskCard({ dossier }: { dossier: Dossier }) {
   const { risk } = dossier;
@@ -125,8 +121,6 @@ export function RiskCard({ dossier }: { dossier: Dossier }) {
   );
 }
 
-// ───────────────────────────── Кто перед нами ─────────────────────────────
-
 export function IdentityCard({ dossier }: { dossier: Dossier }) {
   const { counterparty, blacklist, tagCounts } = dossier;
   const global = blacklist.filter((b) => b.scope === 'GLOBAL').length;
@@ -152,9 +146,9 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="nick">{counterparty.nickname ?? 'Без ника'}</div>
           <div className="meta-row">
-            {/* явно подписываем: UID здесь биржевой, внутренний ID ниже */}
-            <span className="uid">
-              UID Binance <b className="mono">{counterparty.externalId}</b>
+            {/* это не публичный UID биржи: его в профиле не найти */}
+            <span className="uid" title="Внутренний идентификатор контрагента в P2P Guard">
+              Внутренний ID <b className="mono">{counterparty.externalId}</b>
             </span>
             {counterparty.countryCode ? <span className="badge">{counterparty.countryCode}</span> : null}
           </div>
@@ -191,8 +185,7 @@ export function IdentityCard({ dossier }: { dossier: Dossier }) {
       </div>
 
       <div className="hint" style={{ marginTop: 8 }}>
-        Впервые в базе: {fmtDate(counterparty.firstSeenAt)} · внутренний ID P2P Guard{' '}
-        <span className="mono">{counterparty.id}</span>
+        Впервые в базе: {fmtDate(counterparty.firstSeenAt)}
       </div>
     </div>
   );
@@ -225,8 +218,6 @@ export function TagsCard({ dossier }: { dossier: Dossier }) {
     </div>
   );
 }
-
-// ───────────────────────────── Статистика биржи ─────────────────────────────
 
 export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
   const s = dossier.exchangeStats;
@@ -304,18 +295,6 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
           </div>
         </div>
 
-        <div className={`stat ${codes.has('YOUNG_ACCOUNT') || codes.has('FIRST_ORDER_RECENT') ? 'flag' : ''}`}>
-          <div className="stat-name">Дней с</div>
-          <div className="stat-pair">
-            <span className="stat-k">Регистрации</span>
-            <span className="stat-v">{fmtNumber(s.registeredDays)}</span>
-          </div>
-          <div className="stat-pair">
-            <span className="stat-k">1-го ордера</span>
-            <span className="stat-v">{fmtNumber(s.firstOrderDays)}</span>
-          </div>
-        </div>
-
         <div className={`stat ${codes.has('SLOW_RELEASE') ? 'flag' : ''}`}>
           <div className="stat-name">Среднее время</div>
           <div className="stat-pair">
@@ -360,16 +339,11 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
       </div>
 
       <div className="verify">
-        <span
-          className={`badge ${s.kycCountry ? 'accent' : ''}`}
-          title={
-            s.kycCountry
-              ? 'Страна регистрации аккаунта по данным Binance'
-              : 'Binance не отдала страну регистрации по этому контрагенту'
-          }
-        >
-          Регистрация: {s.kycCountry ?? 'неизвестна'}
-        </span>
+        {s.kycCountry ? (
+          <span className="badge accent" title="Страна регистрации аккаунта по данным Binance">
+            Регистрация: {s.kycCountry}
+          </span>
+        ) : null}
         {s.merchantLevel ? <span className="badge">{s.merchantLevel}</span> : null}
         {verifications.map(([label, ok]) => (
           <span key={label} className={`badge ${ok ? 'ok' : 'bad'}`}>
@@ -381,18 +355,86 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
   );
 }
 
+// объявления контрагента: по ним видно, чем он торгует и на какие суммы
+export function ExchangeAdsCard({ dossier }: { dossier: Dossier }) {
+  const ads = dossier.exchangeAds ?? [];
+  if (!ads.length) return null;
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Объявления на бирже
+        <span className="count">{ads.length}</span>
+      </div>
+      <div className="scroll-y">
+        <table>
+          <thead>
+            <tr>
+              <th>Тип</th>
+              <th>Актив</th>
+              <th style={{ textAlign: 'right' }}>Цена</th>
+              <th style={{ textAlign: 'right' }}>Лимиты</th>
+              <th>Оплата</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ads.map((ad, i) => (
+              <tr key={`${ad.side}-${ad.price}-${i}`}>
+                <td className={ad.side === 'BUY' ? 'buy' : 'sell'}>
+                  {ad.side === 'BUY' ? 'Покупка' : 'Продажа'}
+                </td>
+                <td className="mono">{ad.asset ?? '—'}</td>
+                <td className="num">
+                  {fmtNumber(ad.price)} {ad.fiat ?? ''}
+                </td>
+                <td className="num">
+                  {ad.minFiat === null && ad.maxFiat === null
+                    ? '—'
+                    : `${fmtNumber(ad.minFiat)} — ${fmtNumber(ad.maxFiat)}`}
+                </td>
+                <td>{ad.methods.length ? ad.methods.join(', ') : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // отзывы самой биржи, отдельным блоком
 export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
   const s = dossier.exchangeStats;
+  const all = dossier.exchangeReviews ?? [];
+
+  // счётчики биржи точнее выборки, но есть не всегда — тогда считаем по отзывам
+  const counted = s.positiveCount !== undefined || s.negativeCount !== undefined;
+  const bad = counted ? (s.negativeCount ?? 0) : all.filter((r) => r.rating === 'NEGATIVE').length;
+  const good = counted ? (s.positiveCount ?? 0) : all.filter((r) => r.rating === 'POSITIVE').length;
   const negative = s.negativeCount ?? 0;
+
+  const mood = good + bad === 0 ? null : bad > good ? 'bad' : 'good';
+
+  // без счётчиков и без выборки сказать нечего: «плохих нет» было бы обманом
+  if (!counted && !all.length) return null;
+
   // сначала отрицательные: ради них карточку и открывают
-  const items = [...(dossier.exchangeReviews ?? [])]
+  const items = [...all]
     .sort((a, b) => Number(b.rating === 'NEGATIVE') - Number(a.rating === 'NEGATIVE'))
     .slice(0, 6);
 
   return (
     <div className="card">
-      <div className="card-title">Отзывы Binance</div>
+      <div className="card-title">
+        Отзывы Binance
+        <span className="spacer" style={{ flex: 1 }} />
+        {mood ? (
+          <span className={`badge ${mood === 'good' ? 'ok' : 'bad'}`}>
+            {mood === 'good' ? <IconThumbUp size={13} /> : <IconThumbDown size={13} />}
+            {mood === 'good' ? 'в основном хорошие' : 'в основном плохие'}
+          </span>
+        ) : null}
+      </div>
       {negative > 0 ? (
         <div className="alert bad">
           <IconThumbDown size={15} />
@@ -425,8 +467,6 @@ export function ExchangeReviewsCard({ dossier }: { dossier: Dossier }) {
     </div>
   );
 }
-
-// ───────────────────────────── Ордеры ─────────────────────────────
 
 function OrdersTable({
   rows,
@@ -536,8 +576,6 @@ export function OrdersCard({ dossier }: { dossier: Dossier }) {
   );
 }
 
-// ───────────────────────────── Реквизиты ─────────────────────────────
-
 export function RequisitesCard({ dossier }: { dossier: Dossier }) {
   return (
     <div className="card">
@@ -561,8 +599,6 @@ export function RequisitesCard({ dossier }: { dossier: Dossier }) {
     </div>
   );
 }
-
-// ───────────────────────────── Чёрный список ─────────────────────────────
 
 export function BlacklistCard({
   dossier,
@@ -682,8 +718,6 @@ export function BlacklistForm({ dossier, actions }: { dossier: Dossier; actions:
   );
 }
 
-// ───────────────────────────── Заметка команды ─────────────────────────────
-
 export function TeamNoteCard({ dossier, actions }: { dossier: Dossier; actions: DossierActions }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(dossier.teamNote?.text ?? '');
@@ -742,8 +776,6 @@ export function TeamNoteCard({ dossier, actions }: { dossier: Dossier; actions: 
     </div>
   );
 }
-
-// ───────────────────────────── Отзывы ─────────────────────────────
 
 const TAG_ORDER: ReviewTag[] = ['SCAM', 'FREEZE', 'DIRTY', 'TERMS', 'PAINTER', 'RUDE', 'COMMENT'];
 
@@ -867,8 +899,6 @@ export function ReviewsCard({ dossier, actions }: { dossier: Dossier; actions: D
   );
 }
 
-// ───────────────────────────── Быстрые ответы ─────────────────────────────
-
 export function TemplatesCard({
   templates,
   onUse,
@@ -941,6 +971,7 @@ export function DossierView({
       {actions.hasTeam ? <TeamNoteCard dossier={dossier} actions={actions} /> : null}
       <ReviewsCard dossier={dossier} actions={actions} />
       <ExchangeStatsCard dossier={dossier} />
+      <ExchangeAdsCard dossier={dossier} />
       <ExchangeReviewsCard dossier={dossier} />
       <OrdersCard dossier={dossier} />
       <RequisitesCard dossier={dossier} />

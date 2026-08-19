@@ -165,12 +165,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  /**
-   * С кем я недавно торговал — главный экран попапа.
-   *
-   * Отдаём вместе с моим отзывом на каждого: попап должен открываться одним
-   * запросом и сразу показывать, кого ещё не оценил.
-   */
+  // с кем я недавно торговал — главный экран попапа
   app.get('/me/recent-counterparties', auth, async (req) => {
     const { limit } = z
       .object({ limit: z.coerce.number().int().min(1).max(20).default(5) })

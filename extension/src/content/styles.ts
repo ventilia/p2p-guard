@@ -36,8 +36,6 @@ ${themeVars(['.root', '.fab'])}
   font-variant-numeric: tabular-nums;
 }
 
-/* ───────────────────────────── Шапка ───────────────────────────── */
-
 .header {
   display: flex;
   align-items: center;
@@ -69,8 +67,6 @@ ${themeVars(['.root', '.fab'])}
 .icon-btn:hover { background: var(--surface-3); color: var(--text); }
 .icon-btn:disabled { opacity: .45; cursor: default; }
 
-/* ───────────────────────────── Тело ───────────────────────────── */
-
 .body {
   overflow-y: auto;
   overflow-x: hidden;
@@ -101,8 +97,6 @@ ${themeVars(['.root', '.fab'])}
   margin-bottom: 9px;
 }
 .card-title .count { color: var(--muted-2); font-weight: 500; }
-
-/* ───────────────────────────── Риск ───────────────────────────── */
 
 .risk {
   display: flex; gap: 11px; align-items: flex-start;
@@ -144,8 +138,6 @@ ${themeVars(['.root', '.fab'])}
   cursor: pointer; text-decoration: underline dotted;
 }
 .more-btn:hover { color: var(--text); }
-
-/* ───────────────────────────── Кто ───────────────────────────── */
 
 .who { display: flex; gap: 10px; align-items: flex-start; }
 
@@ -204,8 +196,6 @@ ${themeVars(['.root', '.fab'])}
 .status-cell.bad .v { color: var(--bad); }
 .status-cell.warn .v { color: var(--warn); }
 
-/* ───────────────────────────── Теги жалоб ───────────────────────────── */
-
 .tag-row { display: flex; gap: 5px; flex-wrap: wrap; }
 .tag-chip {
   display: inline-flex; align-items: center; gap: 5px;
@@ -219,8 +209,6 @@ ${themeVars(['.root', '.fab'])}
 .tag-chip .n { font-weight: 600; font-family: ${MONO_STACK}; font-size: 11px; }
 .tag-chip.mild { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn); }
 .tag-chip.plain { background: var(--surface-2); border-color: var(--line); color: var(--text-2); }
-
-/* ───────────────────────────── Статистика ───────────────────────────── */
 
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 
@@ -238,8 +226,6 @@ ${themeVars(['.root', '.fab'])}
 .stat-k { font-size: 10.5px; color: var(--muted); }
 .stat-v { font-size: 12.5px; font-weight: 600; font-family: ${MONO_STACK}; }
 .stat.flag .stat-v { color: var(--bad); }
-
-/* ───────────────────────────── Ордеры ───────────────────────────── */
 
 .legend { display: flex; gap: 10px; margin-left: auto; font-size: 10.5px; color: var(--muted); }
 .legend span { display: inline-flex; align-items: center; gap: 4px; }
@@ -295,8 +281,6 @@ td.mono { font-family: ${MONO_STACK}; color: var(--muted); }
 .scroll-y::-webkit-scrollbar { width: 7px; }
 .scroll-y::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 0; }
 
-/* ───────────────────────────── Отзывы ───────────────────────────── */
-
 .verify { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
 
 .review { padding: 8px 0; border-top: 1px solid var(--line); }
@@ -312,8 +296,6 @@ td.mono { font-family: ${MONO_STACK}; color: var(--muted); }
   background: var(--surface-3); color: var(--muted);
 }
 
-/* ───────────────────────────── Реквизиты ───────────────────────────── */
-
 .req-row {
   display: flex; align-items: center; gap: 7px;
   padding: 6px 0; border-top: 1px solid var(--line);
@@ -321,8 +303,6 @@ td.mono { font-family: ${MONO_STACK}; color: var(--muted); }
 }
 .req-row:first-of-type { border-top: 0; }
 .req-mask { font-family: ${MONO_STACK}; flex: 1; }
-
-/* ───────────────────────────── Формы ───────────────────────────── */
 
 textarea, input, select {
   width: 100%;
@@ -403,8 +383,6 @@ textarea::placeholder, input::placeholder { color: var(--muted-2); }
 }
 .template-chip:hover { background: var(--line); color: var(--text); }
 
-/* ───────────────────────────── Состояния ───────────────────────────── */
-
 .hint { font-size: 11px; color: var(--muted); line-height: 1.45; }
 .muted { color: var(--muted); font-size: 12px; }
 
@@ -431,8 +409,6 @@ textarea::placeholder, input::placeholder { color: var(--muted-2); }
   animation: pg-spin .7s linear infinite;
 }
 @keyframes pg-spin { to { transform: rotate(360deg); } }
-
-/* ───────────────────────────── Свёрнутая кнопка ───────────────────────────── */
 
 /* свёрнутая панель: тот же знак, что в тулбаре, плюс метка риска */
 .fab {

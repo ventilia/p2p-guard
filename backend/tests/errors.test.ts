@@ -1,7 +1,4 @@
-/**
- * Форма ошибок наружу. Расширение реагирует на error.code, поэтому важен не
- * только статус, но и код: по нему панель решает, что показать пользователю.
- */
+// форма ошибок наружу: расширение реагирует на error.code, а не на текст
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import Fastify from 'fastify';

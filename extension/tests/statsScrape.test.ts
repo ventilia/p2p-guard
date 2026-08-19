@@ -1,15 +1,9 @@
-/**
- * Чтение статистики контрагента из вёрстки Binance.
- *
- * Разметка здесь повторяет живую страницу профиля: подпись и значение лежат в
- * РАЗНЫХ ветках карточки, а число и его единица — отдельными узлами
- * (span «376» + span «Раз(-а)»). Рядом с подписью висит подсказка, в которой
- * тоже есть цифры — попасть в неё нельзя.
- */
+// чтение статистики контрагента из вёрстки Binance
 import assert from 'node:assert/strict';
 import { describe, it, before, after } from 'node:test';
 
 let scrape: typeof import('../src/content/statsScrape.js').scrapeCounterpartyStats;
+let scrapeAds: typeof import('../src/content/statsScrape.js').scrapeExchangeAds;
 
 // узкая заглушка DOM: нужен обход детей и текст, больше ничего
 class El {
@@ -38,11 +32,16 @@ class El {
   flatten(): El[] {
     return [this, ...this.children.flatMap((c) => c.flatten())];
   }
+
+  querySelectorAll(sel: string): El[] {
+    const tags = sel.split(',').map((s) => s.trim());
+    return this.flatten().filter((e) => e !== this && tags.includes(e.tag));
+  }
 }
 
 const el = (tag: string, text = '') => new El(tag, text);
 
-/** Карточка статистики: подпись с подсказкой слева, число с единицей справа. */
+// карточка статистики: подпись с подсказкой слева, число с единицей справа
 function card(label: string, value: string, unit: string, hint = ''): El {
   return el('div').add(
     el('div').add(el('div').add(el('div', label), el('div', hint))),
@@ -88,7 +87,7 @@ const ORDER_URL = '/ru/fiatOrderDetail?orderNo=22923118198088511488';
 
 before(async () => {
   installDom(profilePage(), PAGE_TEXT, PROFILE_URL);
-  ({ scrapeCounterpartyStats: scrape } = await import('../src/content/statsScrape.js'));
+  ({ scrapeCounterpartyStats: scrape, scrapeExchangeAds: scrapeAds } = await import('../src/content/statsScrape.js'));
 });
 
 after(() => {
@@ -157,5 +156,41 @@ describe('статистика профиля', () => {
     installDom(page, '', ORDER_URL);
 
     assert.equal(scrape()!.avgReleaseMinutes, 1);
+  });
+});
+
+describe('объявления контрагента', () => {
+  it('читает тип, цену, лимиты и способ оплаты', () => {
+    const ad = el('div').add(
+      el('div').add(el('div', 'USDT')),
+      el('div').add(el('div', '552.00'), el('div', 'KZT')),
+      el('div').add(el('div', 'Лимит ордера'), el('div', '5000'), el('div', '150000')),
+      el('div').add(el('div', 'Kaspi Bank')),
+    );
+    const page = el('div').add(el('div', 'Активные объявления на покупку'), ad);
+    installDom(page, '', PROFILE_URL);
+
+    const [first] = scrapeAds();
+    assert.equal(first!.side, 'BUY');
+    assert.equal(first!.asset, 'USDT');
+    assert.equal(first!.price, 552);
+    assert.equal(first!.fiat, 'KZT');
+    assert.equal(first!.minFiat, 5000);
+    assert.equal(first!.maxFiat, 150000);
+    assert.deepEqual([...first!.methods], ['Kaspi Bank']);
+  });
+
+  it('различает покупку и продажу по заголовку', () => {
+    const row = () => el('div').add(el('div', 'USDT'), el('div').add(el('div', '540'), el('div', 'KZT')));
+    const page = el('div')
+      .add(el('div', 'Активные объявления на продажу'), row());
+    installDom(page, '', PROFILE_URL);
+
+    assert.equal(scrapeAds()[0]!.side, 'SELL');
+  });
+
+  it('молчит там, где объявлений нет', () => {
+    installDom(el('div').add(el('div', 'Переведите оплату')), '', ORDER_URL);
+    assert.equal(scrapeAds().length, 0);
   });
 });

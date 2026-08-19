@@ -23,8 +23,6 @@ body, .popup-shell {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ───────────────────────────── Каркас ───────────────────────────── */
-
 .shell { display: flex; flex-direction: column; height: 100%; }
 
 .top {
@@ -73,8 +71,6 @@ body, .popup-shell {
 .content::-webkit-scrollbar-thumb {
   background: var(--line-strong); border-radius: 0; border: 3px solid var(--bg);
 }
-
-/* ───────────────────────────── Общее ───────────────────────────── */
 
 .card {
   background: var(--surface);
@@ -244,8 +240,6 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 @keyframes pg-spin { to { transform: rotate(360deg); } }
 
-/* ───────────────────────────── Поиск ───────────────────────────── */
-
 .result {
   display: flex; align-items: center; gap: 9px;
   padding: 8px; border-radius: 0;
@@ -270,8 +264,6 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
 }
 .avatar .initial { font-size: 13px; font-weight: 600; color: var(--text-2); }
 
-/* ───────────────────────────── Команда ───────────────────────────── */
-
 .member {
   display: flex; align-items: center; gap: 9px;
   padding: 8px 0; border-top: 1px solid var(--line);
@@ -290,8 +282,6 @@ input::placeholder, textarea::placeholder { color: var(--muted-2); }
   word-break: break-all; color: var(--accent);
   font-size: 12px;
 }
-
-/* ───────────────────────────── Шаблоны ───────────────────────────── */
 
 .tpl {
   padding: 8px 0; border-top: 1px solid var(--line);

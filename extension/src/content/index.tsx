@@ -11,6 +11,7 @@ import {
   openReviewsTab,
   profileUserNo,
   scrapeCounterpartyStats,
+  scrapeExchangeAds,
   scrapeExchangeReviews,
 } from './statsScrape.js';
 import type { DomSnapshot, ExchangeStats } from '../shared/types.js';
@@ -53,8 +54,6 @@ function mountPanel(): void {
     </StrictMode>,
   );
 }
-
-// ───────────────────────────── Мост со страницей ─────────────────────────────
 
 function listenPageMessages(): void {
   window.addEventListener('message', (event: MessageEvent) => {
@@ -106,8 +105,6 @@ const orderIdFromUrl = (url: string): string | null =>
   /\/(\d{15,32})(?:\/|$|\?)/.exec(url)?.[1] ??
   null;
 
-// ───────────────────────────── Запасной разбор DOM ─────────────────────────────
-
 // если API недоступен, ник и UID всё равно есть в ссылке на профиль
 function scrapeDom(): DomSnapshot | null {
   const snapshot: DomSnapshot = {};
@@ -140,7 +137,6 @@ function scrapeDom(): DomSnapshot | null {
   return snapshot.counterpartyUid || snapshot.orderId || snapshot.stats ? snapshot : null;
 }
 
-
 let scrapeTimer: number | undefined;
 let lastScrapeJson = '';
 
@@ -158,14 +154,7 @@ function scheduleScrape(): void {
   }, 800);
 }
 
-/**
- * Читает профиль, пока страница его дорисовывает.
- *
- * Вкладка фоновая: React грузит данные не мгновенно, а таймеры в ней Chrome
- * притормаживает. Поэтому ждём долго и отправляем найденное сразу, не
- * дожидаясь полного набора — иначе при первой же задержке в ордер не
- * приходило ничего.
- */
+// читает профиль, пока страница его дорисовывает
 function watchProfile(): void {
   const DEADLINE_MS = 60_000;
   const started = Date.now();
@@ -182,13 +171,16 @@ function watchProfile(): void {
 
     const stats = scrapeCounterpartyStats();
     const reviews = openedReviews ? scrapeExchangeReviews() : [];
+    // объявления читаем, только когда цифры уже на месте: до этого страница
+    // ещё рисуется, а обход стоит дорого
+    const ads = stats?.totalOrders === undefined ? [] : scrapeExchangeAds();
 
     // шлём каждое изменение: досье дополняется по частям
-    const shot = JSON.stringify({ stats, count: reviews.length });
+    const shot = JSON.stringify({ stats, reviews: reviews.length, ads });
     if (stats && shot !== sent) {
       sent = shot;
       const userNo = profileUserNo();
-      if (userNo) void sendMessage({ type: 'PROFILE_STATS', userNo, stats, reviews });
+      if (userNo) void sendMessage({ type: 'PROFILE_STATS', userNo, stats, reviews, ads });
     }
 
     // цифры на месте — открываем отзывы и продолжаем следить

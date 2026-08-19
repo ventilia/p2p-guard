@@ -12,11 +12,8 @@ const paging = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
-
 export async function adminRoutes(app: FastifyInstance): Promise<void> {
   const admin = { preHandler: [app.authenticate, app.requireRole(Role.ADMIN)] };
-
-  // ─────────────────────────── Сводка ───────────────────────────
 
   app.get('/admin/overview', admin, async () => {
     const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -46,8 +43,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       volumeFiat: Number(volume._sum.amountFiat ?? 0),
     };
   });
-
-  // ─────────────────────────── Пользователи ───────────────────────────
 
   app.get('/admin/users', admin, async (req) => {
     const query = paging
@@ -384,8 +379,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  // ─────────────────────────── Токены доступа ───────────────────────────
-
   app.get('/admin/tokens', admin, async (req) => {
     const query = paging.parse(req.query);
 
@@ -488,8 +481,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     return { ok: true };
   });
-
-  // ─────────────────────────── Команды ───────────────────────────
 
   app.get('/admin/teams', admin, async () => {
     const teams = await prisma.team.findMany({
@@ -623,8 +614,6 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
     return { ok: true };
   });
-
-  // ─────────────────────────── Аудит ───────────────────────────
 
   app.get('/admin/audit', admin, async (req) => {
     const query = paging.extend({ action: z.string().max(64).optional() }).parse(req.query);

@@ -42,7 +42,7 @@ export class ApiError extends Error {
   }
 }
 
-// App подписывается, чтобы вернуть экран входа
+// app подписывается, чтобы вернуть экран входа
 const logoutListeners = new Set<() => void>();
 
 export function onLogout(listener: () => void): () => void {
