@@ -6,7 +6,7 @@ const KEY = 'pg.popup.state';
 
 // попап держит только самое частое: оценить контрагента и настройки
 // разбор досье, команда и шаблоны живут в панели ордера
-export type PopupTab = 'review' | 'settings';
+export type PopupTab = 'review' | 'team' | 'settings';
 
 export type PopupState = {
   tab: PopupTab;

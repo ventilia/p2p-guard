@@ -13,7 +13,7 @@ import {
   scrapeCounterpartyStats,
   scrapeExchangeReviews,
 } from './statsScrape.js';
-import type { DomSnapshot } from '../shared/types.js';
+import type { DomSnapshot, ExchangeStats } from '../shared/types.js';
 
 const CHANNEL = 'p2p-guard';
 
@@ -140,17 +140,6 @@ function scrapeDom(): DomSnapshot | null {
   return snapshot.counterpartyUid || snapshot.orderId || snapshot.stats ? snapshot : null;
 }
 
-// страница профиля открывается фоновой вкладкой ради недостающих полей:
-// пользователь остаётся в ордере и ничего не замечает
-function reportProfile(): void {
-  const userNo = profileUserNo();
-  if (!userNo) return;
-
-  const stats = scrapeCounterpartyStats();
-  if (!stats) return;
-
-  void sendMessage({ type: 'PROFILE_STATS', userNo, stats, reviews: scrapeExchangeReviews() });
-}
 
 let scrapeTimer: number | undefined;
 let lastScrapeJson = '';
@@ -169,26 +158,60 @@ function scheduleScrape(): void {
   }, 800);
 }
 
-// профиль рисуется не сразу, поэтому пробуем несколько раз и умолкаем
+/**
+ * Читает профиль, пока страница его дорисовывает.
+ *
+ * Вкладка фоновая: React грузит данные не мгновенно, а таймеры в ней Chrome
+ * притормаживает. Поэтому ждём долго и отправляем найденное сразу, не
+ * дожидаясь полного набора — иначе при первой же задержке в ордер не
+ * приходило ничего.
+ */
 function watchProfile(): void {
-  let left = 14;
-  let opened = false;
+  const DEADLINE_MS = 60_000;
+  const started = Date.now();
 
-  const timer = window.setInterval(() => {
-    left -= 1;
+  let sent = '';
+  let openedReviews = false;
+  let done = false;
+
+  const enough = (s: ExchangeStats | null) =>
+    !!s && s.totalOrders !== undefined && s.joinedAt !== undefined;
+
+  const tick = () => {
+    if (done) return;
+
     const stats = scrapeCounterpartyStats();
+    const reviews = openedReviews ? scrapeExchangeReviews() : [];
 
-    // цифры готовы — открываем вкладку отзывов и даём ей отрисоваться
-    if (!opened && stats?.totalOrders !== undefined) {
-      opened = true;
-      if (openReviewsTab()) return;
+    // шлём каждое изменение: досье дополняется по частям
+    const shot = JSON.stringify({ stats, count: reviews.length });
+    if (stats && shot !== sent) {
+      sent = shot;
+      const userNo = profileUserNo();
+      if (userNo) void sendMessage({ type: 'PROFILE_STATS', userNo, stats, reviews });
     }
 
-    if (opened || left <= 0) {
+    // цифры на месте — открываем отзывы и продолжаем следить
+    if (!openedReviews && enough(stats)) {
+      openedReviews = true;
+      openReviewsTab();
+      return;
+    }
+
+    // отзывы забрали или время вышло
+    if ((openedReviews && reviews.length) || Date.now() - started > DEADLINE_MS) {
+      done = true;
       window.clearInterval(timer);
-      reportProfile();
+      observer.disconnect();
     }
-  }, 700);
+  };
+
+  // мутации не зависят от кадров и в фоновой вкладке приходят исправно
+  const observer = new MutationObserver(tick);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  const timer = window.setInterval(tick, 1000);
+  tick();
 }
 
 // слушаем только добавление узлов и схлопываем всплеск в один разбор

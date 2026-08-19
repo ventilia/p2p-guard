@@ -77,7 +77,9 @@ function installDom(root: El, bodyText: string, url: string) {
       const tags = sel.split(',').map((s) => s.trim());
       return all.filter((e) => tags.includes(e.tag));
     },
-    body: { innerText: bodyText },
+    // код читает textContent: innerText требует раскладки, которой в фоновой
+    // вкладке нет. У настоящего body есть оба, поэтому даём оба
+    body: { textContent: bodyText, innerText: bodyText },
   };
 }
 

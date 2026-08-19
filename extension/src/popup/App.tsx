@@ -48,6 +48,7 @@ type Tab = PopupTab;
 
 const TABS: { key: Tab; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
   { key: 'review', label: 'Оценить', Icon: IconStar },
+  { key: 'team', label: 'Команда', Icon: IconUsers },
   { key: 'settings', label: 'Настройки', Icon: IconSettings },
 ];
 
@@ -181,6 +182,9 @@ export function App() {
             />
             <ReviewTab onError={setError} onNotice={setNotice} />
           </>
+        ) : null}
+        {tab === 'team' ? (
+          <TeamTab session={session} onError={setError} onNotice={setNotice} onReload={reload} />
         ) : null}
         {tab === 'settings' ? (
           <SettingsTab
@@ -1447,17 +1451,8 @@ function SettingsTab({
         </button>
       </div>
 
-      {/* команда и шаблоны — редкие операции, поэтому свёрнуты: главный экран
-          попапа занят тем, что нужно после каждой сделки */}
-      <details className="advanced">
-        <summary>
-          <IconUsers size={13} /> Команда
-        </summary>
-        <div style={{ marginTop: 8 }}>
-          <TeamTab session={session} onError={onError} onNotice={onNotice} onReload={onReloadSession} />
-        </div>
-      </details>
-
+      {/* шаблоны нужны реже остального, поэтому свёрнуты: команда теперь
+          отдельной вкладкой, её искать в настройках было негде */}
       <details className="advanced">
         <summary>
           <IconNote size={13} /> Шаблоны быстрых ответов

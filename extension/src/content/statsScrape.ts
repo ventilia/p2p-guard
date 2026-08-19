@@ -156,7 +156,10 @@ export function scrapeCounterpartyStats(): ExchangeStats | null {
     }
   }
 
-  const pageText = document.body?.innerText?.slice(0, 40_000) ?? '';
+  // именно textContent, а не innerText: innerText требует раскладки, а её
+  // Chrome в фоновой вкладке не делает — дата регистрации и число отзывов
+  // из профиля тогда не читались вовсе
+  const pageText = (document.body?.textContent ?? '').slice(0, 60_000);
 
   const joined = JOINED.exec(pageText);
   if (joined?.[1]) stats.joinedAt = new Date(`${joined[1]}T00:00:00.000Z`).toISOString();

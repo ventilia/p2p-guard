@@ -14,7 +14,9 @@ const PROFILE_URL = 'https://c2c.binance.com/ru/advertiserDetail?advertiserNo=';
 // профиль меняется медленно, а лишняя вкладка заметна — ходим редко
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const CACHE_KEY = 'pg.profileCache';
-const WAIT_MS = 15_000;
+// вкладка фоновая: React грузит профиль не мгновенно, а таймеры в ней Chrome
+// притормаживает. Пятнадцати секунд не хватало, и вкладку закрывали пустой
+const WAIT_MS = 90_000;
 
 type CacheEntry = { at: number; stats: ExchangeStats; reviews?: ExchangeReview[] };
 type Cache = Record<string, CacheEntry>;
