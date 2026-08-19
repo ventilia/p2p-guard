@@ -1,63 +1,63 @@
 /**
- * Место для панели на странице ордера.
+ * Раскладка панели на странице ордера.
  *
- * Панель — самостоятельный блок документа под чатом. Раньше она была накладкой
- * поверх и ужимала переписку, чтобы влезть в её колонку: снаружи это читалось
- * как часть чата и разъезжалось на некоторых размерах. Теперь вёрстку биржи не
- * трогаем, а координаты считаем в документе, чтобы блок прокручивался вместе
- * со страницей.
+ * Панель встраивается в вёрстку биржи обычным блоком. Координаты считать
+ * нельзя: столбец чата у Binance position:fixed, в потоке места не занимает, и
+ * его top при прокрутке не меняется. Позиция, посчитанная от него и сложенная
+ * с прокруткой, убегала вниз вместе со страницей — панель мелькала и пропадала.
+ * Поэтому здесь только размеры и отступы, а раскладывает браузер.
  */
 import assert from 'node:assert/strict';
-import { documentBox, floatingBox, type AnchorBox } from '../src/content/anchor.js';
 import { describe, it } from 'node:test';
+import { flowStyle, floatingBox } from '../src/content/anchor.js';
 
-// столбец чата с живой страницы: x=1016, ширина 408, от 64 до низа окна
+// столбец чата с живой страницы: ширина 408, во всю высоту окна
 const view = { width: 1440, height: 860 };
-const chat: AnchorBox = { top: 64, left: 1016, width: 408, height: 796 };
+const chat = { width: 408, height: 796 };
 const panel = { width: 720, height: 720 };
 
 describe('блок под чатом', () => {
-  it('встаёт ниже чата с отступом', () => {
-    const box = documentBox(chat, panel, { x: 0, y: 0 }, view);
+  it('опускается ровно под переписку', () => {
+    const style = flowStyle(chat, panel, view);
 
-    assert.equal(box.top, chat.top + chat.height + 12);
-    assert.equal(box.height, panel.height);
+    assert.equal(style.marginTop, chat.height + 12);
+    assert.equal(style.maxHeight, panel.height);
   });
 
-  it('живёт в координатах документа, а не окна', () => {
-    const scrolled = documentBox(chat, panel, { x: 0, y: 500 }, view);
-    const top = documentBox(chat, panel, { x: 0, y: 0 }, view);
+  it('шире колонки чата и уходит влево отрицательным отступом', () => {
+    const style = flowStyle(chat, panel, view);
 
-    // чат фиксированный: при прокрутке его top в окне не меняется, а блок
-    // обязан уехать вместе со страницей
-    assert.equal(scrolled.top, top.top + 500);
+    assert.equal(style.width, 720);
+    // правый край остаётся на правом крае чата
+    assert.equal(style.marginLeft, chat.width - style.width);
+    assert.ok(style.marginLeft < 0, 'панель шире колонки — отступ обязан быть отрицательным');
   });
 
-  it('прижат правым краем к чату и растёт влево', () => {
-    const box = documentBox(chat, panel, { x: 0, y: 0 }, view);
+  it('уже колонки чата не становится', () => {
+    const style = flowStyle(chat, { width: 100, height: 720 }, view);
 
-    assert.equal(box.width, 720);
-    assert.equal(box.left + box.width, chat.left + chat.width);
+    assert.equal(style.width, chat.width);
+    assert.equal(style.marginLeft, 0);
   });
 
-  it('не бывает уже колонки чата', () => {
-    const box = documentBox(chat, { width: 100, height: 720 }, { x: 0, y: 0 }, view);
+  it('не вылезает за пределы окна при огромной ширине', () => {
+    const style = flowStyle(chat, { width: 9000, height: 720 }, view);
 
-    assert.equal(box.width, chat.width);
+    assert.ok(style.width <= view.width - 24, `width=${style.width}`);
   });
 
-  it('не вылезает за левый край страницы', () => {
-    const box = documentBox(chat, { width: 5000, height: 720 }, { x: 0, y: 0 }, view);
+  it('на узком окне остаётся хотя бы шириной с чат', () => {
+    const narrow = { width: 360, height: 800 };
+    const style = flowStyle(chat, panel, narrow);
 
-    assert.ok(box.left >= 12, `left=${box.left}`);
-    assert.ok(box.left + box.width <= chat.left + chat.width);
+    assert.ok(style.width >= chat.width, `width=${style.width}`);
   });
 
-  it('учитывает горизонтальную прокрутку', () => {
-    const box = documentBox(chat, panel, { x: 200, y: 0 }, view);
-    const base = documentBox(chat, panel, { x: 0, y: 0 }, view);
+  it('не зависит от прокрутки: в потоке её учитывает браузер', () => {
+    const a = flowStyle(chat, panel, view);
+    const b = flowStyle(chat, panel, view);
 
-    assert.equal(box.left, base.left + 200);
+    assert.deepEqual({ ...a }, { ...b });
   });
 });
 

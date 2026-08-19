@@ -356,8 +356,7 @@ export function ExchangeStatsCard({ dossier }: { dossier: Dossier }) {
 
       {/* биржа средний чек не отдаёт, и придумывать его нельзя */}
       <div className="hint" style={{ marginTop: 8 }}>
-        Средний чек Binance не публикует — он считается по сделкам из базы P2P Guard и уточняется
-        по мере их накопления.
+        Средний чек считается по сделкам базы.
       </div>
 
       <div className="verify">

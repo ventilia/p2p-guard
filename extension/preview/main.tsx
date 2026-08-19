@@ -213,7 +213,8 @@ function openDemoOrder(): void {
   );
 
   demoHost = document.createElement('div');
-  demoHost.id = 'pg-demo-panel';
+  // тот же id, что в проде: стенд должен проверять настоящий перенос host
+  demoHost.id = 'p2p-guard-root';
   document.body.appendChild(demoHost);
 
   mountInShadow(demoHost, panelStyles(__FONT_URL__), (container) => {

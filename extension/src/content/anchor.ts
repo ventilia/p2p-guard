@@ -1,26 +1,26 @@
 // место для панели на странице ордера
 //
-// Панель — САМОСТОЯТЕЛЬНЫЙ блок документа под чатом, а не накладка поверх него.
-// Раньше она была fixed и ужимала переписку, чтобы влезть в её колонку: снаружи
-// это читалось как часть чата, а на некоторых размерах разъезжалось. Теперь
-// вёрстку биржи не трогаем вовсе — блок живёт в координатах документа, ниже
-// чата, и прокручивается вместе со страницей.
+// Панель встраивается В ВЁРСТКУ биржи обычным блоком, а не висит поверх неё.
+// Считать координаты нельзя: столбец чата у Binance position:fixed, в потоке
+// места не занимает, и его top при прокрутке не меняется. Любая позиция,
+// посчитанная от него и сложенная с прокруткой, убегает вниз вместе со
+// страницей — панель мелькала и пропадала. Поэтому мы отдаём раскладку
+// браузеру: вставляем host в поточного родителя чата и лишь сдвигаем
+// отступами.
 //
-// Чат ищем от поля ввода вверх: классы у биржи генерируемые, а поле ввода есть
+// Чат ищем от поля ввода вверх: классы у биржи генерируемые, поле ввода есть
 // всегда.
 
-import type { PanelPlacement } from '../shared/types.js';
 import { findChatInput } from './chatInput.js';
 
-export type AnchorBox = { top: number; left: number; width: number; height: number };
 export type Viewport = { width: number; height: number };
 
 const GAP = 12;
-// панель не должна быть уже колонки чата: там нечего показывать
+// уже колонки чата панель делать незачем: там нечего показывать
 const MIN_WIDTH = 320;
 
-// столбец чата: от поля ввода поднимаемся, пока блок растёт по высоте
-function findChatColumn(): HTMLElement | null {
+/** Столбец чата: от поля ввода поднимаемся, пока блок растёт по высоте. */
+export function findChatColumn(): HTMLElement | null {
   const input = findChatInput();
   if (!input) return null;
 
@@ -38,32 +38,70 @@ function findChatColumn(): HTMLElement | null {
   return best;
 }
 
+export const HOST_ID = 'p2p-guard-root';
+
 /**
- * Координаты блока в документе, а не в окне.
+ * Переносит host в вёрстку биржи или обратно в корень документа.
  *
- * anchor — прямоугольник чата в координатах окна, scroll — текущая прокрутка.
- * Панель прижата правым краем к чату и растёт влево: колонка переписки узкая,
- * а слева на странице обычно пусто.
+ * В потоке блок раскладывает браузер: координаты считать не нужно и панель не
+ * убегает при прокрутке. Пока чат не найден, host висит в корне и панель
+ * работает накладкой.
  */
-export function documentBox(
-  anchor: AnchorBox,
+export function moveHost(intoPage: boolean): void {
+  const host = document.getElementById(HOST_ID);
+  if (!host) return;
+
+  const target = intoPage ? findHostParent() : document.documentElement;
+  if (!target || host.parentElement === target) return;
+
+  target.appendChild(host);
+}
+
+/**
+ * Куда встраивать блок.
+ *
+ * Поточный родитель фиксированного чата: сам чат места не занимает, поэтому
+ * наш блок встаёт в начало его ячейки, а вниз мы его опускаем отступом.
+ */
+export function findHostParent(): HTMLElement | null {
+  return findChatColumn()?.parentElement ?? null;
+}
+
+export type FlowStyle = {
+  width: number;
+  marginTop: number;
+  // отрицательный, когда панель шире колонки: так она уходит влево
+  marginLeft: number;
+  maxHeight: number;
+};
+
+/**
+ * Отступы для блока в потоке.
+ *
+ * Правый край держим на правом крае чата, влево растём на свободное место
+ * страницы. Верхний отступ равен высоте чата — так блок оказывается точно
+ * под перепиской и дальше живёт по обычным правилам вёрстки.
+ */
+export function flowStyle(
+  chat: { width: number; height: number },
   panel: { width: number; height: number },
-  scroll: { x: number; y: number },
   view: Viewport,
-): AnchorBox {
-  const right = anchor.left + anchor.width;
-  const width = Math.min(Math.max(panel.width, anchor.width, MIN_WIDTH), right - GAP);
+): FlowStyle {
+  const width = Math.min(
+    Math.max(panel.width, chat.width, MIN_WIDTH),
+    Math.max(chat.width, view.width - GAP * 2),
+  );
 
   return {
-    top: anchor.top + anchor.height + GAP + scroll.y,
-    left: Math.max(GAP, right - width) + scroll.x,
     width,
-    height: panel.height,
+    marginTop: chat.height + GAP,
+    marginLeft: chat.width - width,
+    maxHeight: panel.height,
   };
 }
 
-// свободное размещение: правый верх окна, панель никуда не привязана
-export function floatingBox(width: number, height: number, view: Viewport): AnchorBox {
+// свободное размещение: накладка в правом верхнем углу окна
+export function floatingBox(width: number, height: number, view: Viewport) {
   return {
     top: 76,
     left: Math.max(GAP, view.width - width - 20),
@@ -72,40 +110,63 @@ export function floatingBox(width: number, height: number, view: Viewport): Anch
   };
 }
 
-export type Layout = {
-  box: AnchorBox;
-  // absolute — блок в потоке документа, fixed — накладка поверх окна
-  position: 'absolute' | 'fixed';
-};
+export type Layout =
+  | { mode: 'flow'; maxHeight: number }
+  | { mode: 'floating'; box: ReturnType<typeof floatingBox> };
+
+/**
+ * Применяет размеры к host и выравнивает его правый край по чату.
+ *
+ * Где именно окажется блок, посчитать нельзя: чат у биржи position:fixed, в
+ * потоке его нет, и наш блок садится следом за колонкой ордера. Поэтому
+ * ставим отступ в ноль, меряем, куда он встал, и одним шагом сдвигаем влево.
+ * Замер не зависит от прокрутки, поэтому повторов и дрожания не будет.
+ */
+function applyFlowToHost(host: HTMLElement, chat: DOMRect, style: FlowStyle): void {
+  // родитель у биржи флексовый: без запрета сжатия ширину урежут
+  host.style.flex = '0 0 auto';
+  host.style.width = `${style.width}px`;
+  host.style.marginTop = `${style.marginTop}px`;
+  host.style.marginLeft = '0px';
+
+  const natural = host.getBoundingClientRect();
+  const shift = Math.round(chat.right - (natural.left + style.width));
+
+  // правый край чата заведомо внутри окна, поэтому сдвиг безопасен в обе стороны
+  host.style.marginLeft = `${shift}px`;
+}
+
+function resetHost(host: HTMLElement): void {
+  host.style.flex = '';
+  host.style.width = '';
+  host.style.marginTop = '';
+  host.style.marginLeft = '';
+}
 
 export function computeLayout(
-  placement: PanelPlacement,
+  placement: 'chat-bottom' | 'floating',
   panel: { width: number; height: number },
 ): Layout {
   const view: Viewport = { width: window.innerWidth, height: window.innerHeight };
+  const host = document.getElementById(HOST_ID);
 
   const chat = placement === 'floating' ? null : findChatColumn();
   if (!chat) {
-    return { box: floatingBox(panel.width, panel.height, view), position: 'fixed' };
+    if (host) resetHost(host);
+    return { mode: 'floating', box: floatingBox(panel.width, panel.height, view) };
   }
 
   const rect = chat.getBoundingClientRect();
-  const scroll = { x: window.scrollX, y: window.scrollY };
+  const style = flowStyle({ width: rect.width, height: rect.height }, panel, view);
+  if (host) applyFlowToHost(host, rect, style);
 
-  return {
-    box: documentBox(
-      { top: rect.top, left: rect.left, width: rect.width, height: rect.height },
-      panel,
-      scroll,
-      view,
-    ),
-    position: 'absolute',
-  };
+  return { mode: 'flow', maxHeight: style.maxHeight };
 }
 
 /**
  * Пересчитывает раскладку при изменениях страницы.
- * Чат появляется не сразу и переезжает при ресайзе, поэтому одного замера мало.
+ * Чат появляется не сразу и меняет размеры при ресайзе, поэтому одного замера
+ * мало. За прокруткой следить не нужно: блок в потоке едет сам.
  */
 export function watchLayout(compute: () => void): () => void {
   let frame = 0;
@@ -115,9 +176,6 @@ export function watchLayout(compute: () => void): () => void {
   };
 
   window.addEventListener('resize', schedule);
-  // блок в координатах документа: при прокрутке пересчёт не нужен, но чат
-  // фиксированный и его top меняется вместе с ней
-  window.addEventListener('scroll', schedule, true);
 
   const observer = new MutationObserver(schedule);
   observer.observe(document.body ?? document.documentElement, { childList: true, subtree: true });
@@ -130,7 +188,6 @@ export function watchLayout(compute: () => void): () => void {
     cancelAnimationFrame(frame);
     window.clearInterval(timer);
     window.removeEventListener('resize', schedule);
-    window.removeEventListener('scroll', schedule, true);
     observer.disconnect();
   };
 }

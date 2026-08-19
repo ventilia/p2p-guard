@@ -10,7 +10,9 @@ const CSS = `
   position: fixed; inset: 0; z-index: 900;
   background: #181A20; color: #EAECEF;
   font-family: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
-  font-size: 14px; overflow: hidden;
+  font-size: 14px;
+  /* на бирже прокручивается сам документ, в макете — этот контейнер */
+  overflow-y: auto;
 }
 #pg-demo-order * { box-sizing: border-box; }
 
@@ -117,10 +119,8 @@ const HTML = `
   <span class="logo">◆ BINANCE</span>
   <a>Купить криптовалюту</a><a>Рынки</a><a>Торговля</a><a>P2P</a>
   <span class="spacer"></span>
-  <label class="ctl">Ширина чата<input type="range" id="pg-w" min="280" max="720" step="8" value="408"></label>
-  <label class="ctl">Высота чата<input type="range" id="pg-h" min="220" max="900" step="20" value="440"></label>
+  <label class="ctl">Ширина панели<input type="range" id="pg-w" min="720" max="1600" step="20" value="720"></label>
   <button class="close" data-place="chat-bottom">Под чатом</button>
-  <button class="close" data-place="chat-left">Слева от чата</button>
   <button class="close" data-place="floating">Свободно</button>
   <button class="close" id="pg-demo-close">Закрыть</button>
 </div>
@@ -199,8 +199,8 @@ export function isOrderPageOpen(): boolean {
 
 export function openOrderPage(
   onClose: () => void,
-  onPlacement: (value: 'chat-bottom' | 'chat-left' | 'floating') => void,
-  onChatSize: (patch: { chatWidth?: number; chatHeight?: number }) => void,
+  onPlacement: (value: 'chat-bottom' | 'floating') => void,
+  onChatSize: (patch: { panelWidth?: number }) => void,
 ): void {
   if (host) return;
   onCloseHook = onClose;
@@ -221,15 +221,12 @@ export function openOrderPage(
 
   for (const button of host.querySelectorAll<HTMLElement>('[data-place]')) {
     button.addEventListener('click', () => {
-      onPlacement(button.dataset.place as 'chat-bottom' | 'chat-left' | 'floating');
+      onPlacement(button.dataset.place as 'chat-bottom' | 'floating');
     });
   }
 
   host.querySelector('#pg-w')?.addEventListener('input', (e) => {
-    onChatSize({ chatWidth: Number((e.target as HTMLInputElement).value) });
-  });
-  host.querySelector('#pg-h')?.addEventListener('input', (e) => {
-    onChatSize({ chatHeight: Number((e.target as HTMLInputElement).value) });
+    onChatSize({ panelWidth: Number((e.target as HTMLInputElement).value) });
   });
 }
 

@@ -8,6 +8,8 @@ ${themeVars(['.root', '.fab'])}
 
 :host {
   all: initial;
+  /* all:initial делает host инлайновым — в потоке страницы это ломает раскладку */
+  display: block;
   font-family: ${FONT_STACK};
 }
 

@@ -10,7 +10,7 @@ import {
 } from '../shared/icons.js';
 import { DossierView, type DossierActions } from '../ui/dossier.js';
 import { insertIntoChat } from './chatInput.js';
-import { computeLayout, watchLayout, type Layout } from './anchor.js';
+import { computeLayout, moveHost, watchLayout, type Layout } from './anchor.js';
 import { detectPageTheme, watchPageTheme, type PageTheme } from './pageTheme.js';
 import { DEFAULT_SETTINGS } from '../shared/storage.js';
 import type { PanelState, Settings } from '../shared/types.js';
@@ -128,17 +128,12 @@ export function Panel() {
         width: settings.panelWidth,
         height: settings.panelHeight,
       });
+
+      // блок живёт в вёрстке биржи, поэтому host переезжает к чату
+      moveHost(next.mode === 'flow');
+
       // сравниваем по значению: иначе каждый кадр давал бы новый рендер
-      setLayout((prev) =>
-        prev &&
-        prev.position === next.position &&
-        prev.box.top === next.box.top &&
-        prev.box.left === next.box.left &&
-        prev.box.width === next.box.width &&
-        prev.box.height === next.box.height
-          ? prev
-          : next,
-      );
+      setLayout((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
     });
   }, [active, settings.panelPlacement, settings.panelWidth, settings.panelHeight]);
 
@@ -179,19 +174,29 @@ export function Panel() {
   const transform = `translate(${offset.x}px, ${offset.y}px)`;
   const ready = state.status === 'ready' ? state : null;
 
-  // под чатом панель — блок документа: absolute в координатах страницы,
-  // поэтому прокручивается вместе с ней. Свободная висит поверх окна
-  const rootStyle = layout
-    ? {
-        transform,
-        position: layout.position,
-        top: layout.box.top,
-        left: layout.box.left,
-        right: 'auto' as const,
-        width: layout.box.width,
-        maxHeight: layout.box.height,
-      }
-    : { transform };
+  // в потоке позицию считает браузер, мы только задаём размеры и отступы;
+  // свободная панель по-прежнему висит поверх окна
+  const rootStyle =
+    layout?.mode === 'flow'
+      ? {
+          // размеры и отступы уже на host, здесь только занять его целиком
+          position: 'relative' as const,
+          top: 'auto' as const,
+          left: 'auto' as const,
+          right: 'auto' as const,
+          width: '100%' as const,
+          maxHeight: layout.maxHeight,
+        }
+      : layout
+        ? {
+            transform,
+            top: layout.box.top,
+            left: layout.box.left,
+            right: 'auto' as const,
+            width: layout.box.width,
+            maxHeight: layout.box.height,
+          }
+        : { transform };
 
   if (collapsed) {
     const level = ready?.dossier.risk.level ?? null;

@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { Panel } from './Panel.js';
 import { panelStyles } from './styles.js';
 import { sendMessage } from '../shared/messages.js';
+import { HOST_ID } from './anchor.js';
 import {
   onProfilePage,
   openReviewsTab,
@@ -14,7 +15,6 @@ import {
 } from './statsScrape.js';
 import type { DomSnapshot } from '../shared/types.js';
 
-const HOST_ID = 'p2p-guard-root';
 const CHANNEL = 'p2p-guard';
 
 // хук должен встать до первых запросов страницы, поэтому синхронно и в начало
