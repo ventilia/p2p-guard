@@ -41,31 +41,23 @@ export function findChatColumn(): HTMLElement | null {
 }
 
 /**
- * Колонка с содержимым ордера — та, что действительно занимает место в потоке.
+ * Куда встраивать блок: контейнер, который укладывает содержимое сверху вниз.
  *
- * Идём от чата вверх до контейнера строки и берём из его детей самого широкого,
- * кто не является веткой чата и не выключен из потока.
+ * Кладём панель НИЖЕ всего блока ордера, а не внутрь его колонки. Внутри
+ * колонка узкая, и широкая панель вылезала бы за неё — а любой предок с
+ * overflow подрезал бы её до невидимости.
  */
-export function findFlowColumn(chat: HTMLElement): HTMLElement | null {
+export function findStackParent(chat: HTMLElement): HTMLElement | null {
+  // строка с колонками: она содержит и ордер, и чат
   let row: HTMLElement | null = chat.parentElement;
-
   for (let depth = 0; row && depth < 8; row = row.parentElement, depth += 1) {
-    if (row.getBoundingClientRect().width < window.innerWidth * 0.5) continue;
-
-    const candidates = Array.from(row.children).filter((child): child is HTMLElement => {
-      if (!(child instanceof HTMLElement)) return false;
-      if (child.contains(chat) || child.id === HOST_ID) return false;
-      return getComputedStyle(child).position !== 'fixed';
-    });
-
-    const widest = candidates.sort(
-      (a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width,
-    )[0];
-
-    if (widest && widest.getBoundingClientRect().width > 300) return widest;
+    if (row.getBoundingClientRect().width >= window.innerWidth * 0.5) break;
   }
+  if (!row) return null;
 
-  return null;
+  // родитель строки укладывает блоки друг под другом — там нам и место
+  const parent = row.parentElement;
+  return parent && getComputedStyle(parent).display !== 'flex' ? parent : row.parentElement;
 }
 
 /**
@@ -74,14 +66,12 @@ export function findFlowColumn(chat: HTMLElement): HTMLElement | null {
  * Растём вправо до левого края чата и ни пикселем дальше: зайдя в его полосу,
  * блок начнёт пересекаться с перепиской при каждой прокрутке.
  */
-export function flowWidth(
-  column: { left: number; width: number },
-  chatLeft: number,
-  wanted: number,
-  view: Viewport,
-): number {
-  const limit = Math.max(column.width, (chatLeft || view.width) - column.left - GAP);
-  return Math.round(Math.min(Math.max(wanted, column.width, MIN_WIDTH), limit));
+export function flowWidth(left: number, chatLeft: number, wanted: number, view: Viewport): number {
+  // предел — левый край чата. Брать максимум с шириной контейнера нельзя:
+  // контейнер тянется на всю страницу, и такой «предел» сводил ограничение
+  // на нет — панель разъезжалась на всю ширину и лезла на переписку
+  const limit = Math.max(MIN_WIDTH, (chatLeft || view.width) - left - GAP);
+  return Math.round(Math.min(Math.max(wanted, MIN_WIDTH), limit));
 }
 
 // свободное размещение: накладка в правом верхнем углу окна
@@ -115,14 +105,14 @@ export function computeLayout(
   const host = document.getElementById(HOST_ID);
 
   const chat = placement === 'floating' ? null : findChatColumn();
-  const column = chat ? findFlowColumn(chat) : null;
+  const column = chat ? findStackParent(chat) : null;
 
   if (!chat || !column || !host) {
     if (host) detachHost(host);
     return { mode: 'floating', box: floatingBox(panel.width, panel.height, view) };
   }
 
-  // host — последний блок колонки ордера, дальше раскладывает браузер
+  // host — последний блок страницы под ордером, дальше раскладывает браузер
   if (host.parentElement !== column) column.appendChild(host);
 
   // родитель у биржи бывает флексовым: без запрета сжатия ширину урежут
@@ -135,12 +125,7 @@ export function computeLayout(
   host.style.width = '';
   const natural = host.getBoundingClientRect();
 
-  const width = flowWidth(
-    { left: natural.left, width: natural.width },
-    chat.getBoundingClientRect().left,
-    panel.width,
-    view,
-  );
+  const width = flowWidth(natural.left, chat.getBoundingClientRect().left, panel.width, view);
   host.style.width = `${width}px`;
 
   return { mode: 'flow', maxHeight: panel.height };
