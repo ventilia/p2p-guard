@@ -1,63 +1,54 @@
 /**
- * Раскладка панели на странице ордера.
+ * Ширина блока панели на странице ордера.
  *
- * Панель встраивается в вёрстку биржи обычным блоком. Координаты считать
- * нельзя: столбец чата у Binance position:fixed, в потоке места не занимает, и
- * его top при прокрутке не меняется. Позиция, посчитанная от него и сложенная
- * с прокруткой, убегала вниз вместе со страницей — панель мелькала и пропадала.
- * Поэтому здесь только размеры и отступы, а раскладывает браузер.
+ * Панель — обычный элемент колонки ордера. В полосу чата она не заходит: тот у
+ * биржи position:fixed и прибит к окну, поэтому любой блок в его полосе при
+ * прокрутке проходит сквозь него. Отсюда единственное ограничение — правый
+ * край не дальше левого края переписки.
  */
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { flowStyle, floatingBox } from '../src/content/anchor.js';
+import { flowWidth, floatingBox } from '../src/content/anchor.js';
 
-// столбец чата с живой страницы: ширина 408, во всю высоту окна
+// раскладка живой страницы: колонка ордера от 24, чат начинается на 1016
 const view = { width: 1440, height: 860 };
-const chat = { width: 408, height: 796 };
-const panel = { width: 720, height: 720 };
+const column = { left: 24, width: 588 };
+const chatLeft = 1016;
 
-describe('блок под чатом', () => {
-  it('опускается ровно под переписку', () => {
-    const style = flowStyle(chat, panel, view);
-
-    assert.equal(style.marginTop, chat.height + 12);
-    assert.equal(style.maxHeight, panel.height);
+describe('ширина блока в колонке ордера', () => {
+  it('растягивается до заданной ширины', () => {
+    assert.equal(flowWidth(column, chatLeft, 720, view), 720);
   });
 
-  it('шире колонки чата и уходит влево отрицательным отступом', () => {
-    const style = flowStyle(chat, panel, view);
+  it('не заходит в полосу чата', () => {
+    const width = flowWidth(column, chatLeft, 5000, view);
 
-    assert.equal(style.width, 720);
-    // правый край остаётся на правом крае чата
-    assert.equal(style.marginLeft, chat.width - style.width);
-    assert.ok(style.marginLeft < 0, 'панель шире колонки — отступ обязан быть отрицательным');
+    assert.equal(column.left + width, chatLeft - 16);
+    assert.ok(column.left + width < chatLeft, 'правый край левее переписки');
   });
 
-  it('уже колонки чата не становится', () => {
-    const style = flowStyle(chat, { width: 100, height: 720 }, view);
-
-    assert.equal(style.width, chat.width);
-    assert.equal(style.marginLeft, 0);
+  it('не бывает уже своей колонки', () => {
+    assert.equal(flowWidth(column, chatLeft, 100, view), column.width);
   });
 
-  it('не вылезает за пределы окна при огромной ширине', () => {
-    const style = flowStyle(chat, { width: 9000, height: 720 }, view);
+  it('на узкой колонке всё равно занимает её целиком', () => {
+    const narrow = { left: 24, width: 900 };
+    const width = flowWidth(narrow, chatLeft, 300, view);
 
-    assert.ok(style.width <= view.width - 24, `width=${style.width}`);
+    assert.equal(width, 900);
   });
 
-  it('на узком окне остаётся хотя бы шириной с чат', () => {
-    const narrow = { width: 360, height: 800 };
-    const style = flowStyle(chat, panel, narrow);
+  it('без чата ограничивается шириной окна', () => {
+    const width = flowWidth(column, 0, 5000, view);
 
-    assert.ok(style.width >= chat.width, `width=${style.width}`);
+    assert.equal(column.left + width, view.width - 16);
   });
 
-  it('не зависит от прокрутки: в потоке её учитывает браузер', () => {
-    const a = flowStyle(chat, panel, view);
-    const b = flowStyle(chat, panel, view);
+  it('не зависит от прокрутки: её учитывает браузер', () => {
+    const a = flowWidth(column, chatLeft, 720, view);
+    const b = flowWidth(column, chatLeft, 720, view);
 
-    assert.deepEqual({ ...a }, { ...b });
+    assert.equal(a, b);
   });
 });
 

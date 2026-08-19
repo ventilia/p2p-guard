@@ -10,7 +10,7 @@ import {
 } from '../shared/icons.js';
 import { DossierView, type DossierActions } from '../ui/dossier.js';
 import { insertIntoChat } from './chatInput.js';
-import { computeLayout, moveHost, watchLayout, type Layout } from './anchor.js';
+import { computeLayout, watchLayout, type Layout } from './anchor.js';
 import { detectPageTheme, watchPageTheme, type PageTheme } from './pageTheme.js';
 import { DEFAULT_SETTINGS } from '../shared/storage.js';
 import type { PanelState, Settings } from '../shared/types.js';
@@ -128,9 +128,6 @@ export function Panel() {
         width: settings.panelWidth,
         height: settings.panelHeight,
       });
-
-      // блок живёт в вёрстке биржи, поэтому host переезжает к чату
-      moveHost(next.mode === 'flow');
 
       // сравниваем по значению: иначе каждый кадр давал бы новый рендер
       setLayout((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));

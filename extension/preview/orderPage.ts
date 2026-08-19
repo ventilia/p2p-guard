@@ -33,9 +33,10 @@ const CSS = `
 }
 #pg-demo-order .ctl input { width: 90px; accent-color: #FCD535; }
 
-#pg-demo-order .body { display: flex; height: calc(100vh - 64px); }
+/* на бирже колонка ордера своей прокрутки не имеет — скроллится документ */
+#pg-demo-order .body { display: flex; align-items: flex-start; }
 #pg-demo-order .order-col {
-  width: 588px; padding: 24px; overflow-y: auto; height: 100%;
+  width: 588px; padding: 24px;
 }
 
 #pg-demo-order h2 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
