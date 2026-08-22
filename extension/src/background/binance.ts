@@ -144,21 +144,6 @@ export function rememberHeaders(headers: Record<string, string>): void {
   })();
 }
 
-export async function getBorrowedHeaders(): Promise<Record<string, string>> {
-  return (await getRoute()).headers;
-}
-
-// сброс выученного маршрута, если биржа переехала
-export async function resetRoute(): Promise<void> {
-  route = null;
-  routeLoading = null;
-  try {
-    await chrome.storage.local.remove(ROUTE_KEY);
-  } catch {
-    // не критично
-  }
-}
-
 export class BinanceApiError extends Error {
   readonly code: string;
 

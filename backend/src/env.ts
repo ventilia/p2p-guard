@@ -34,4 +34,3 @@ export const env = {
   isProd: parsed.data.NODE_ENV === 'production',
 };
 
-export type Env = typeof env;

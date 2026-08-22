@@ -1,10 +1,8 @@
 // одна палитра на панель и попап, светлая по умолчанию: страница ордера светлая
 // тема переключается атрибутом data-theme, переменные наследуются внутрь Shadow DOM
 
-export type ThemeName = 'light' | 'dark' | 'auto';
-
-// iBM Plex Sans (SIL OFL 1.1), вариативный — жирный не подделывается браузером
-// uRL подставляется на месте: chrome-extension:// в панели, обычный путь в попапе
+// IBM Plex Sans (SIL OFL 1.1), вариативный — жирный не подделывается браузером
+// URL подставляется на месте: chrome-extension:// в панели, обычный путь в попапе
 export const fontFace = (url: string): string => `
 @font-face {
   font-family: 'IBM Plex Sans';
@@ -102,12 +100,4 @@ ${sel("[data-theme='dark']")} { ${DARK} }
   ${sel("[data-theme='auto']")} { ${DARK} }
 }
 `;
-};
-
-// единая шкала риска для панели, попапа и админки
-export const RISK_TONE: Record<string, { bg: string; line: string; text: string; label: string }> = {
-  LOW: { bg: 'var(--good-bg)', line: 'var(--good-line)', text: 'var(--good)', label: 'Низкий риск' },
-  MEDIUM: { bg: 'var(--warn-bg)', line: 'var(--warn-line)', text: 'var(--warn)', label: 'Средний риск' },
-  HIGH: { bg: 'var(--bad-bg)', line: 'var(--bad-line)', text: 'var(--bad)', label: 'Высокий риск' },
-  CRITICAL: { bg: 'var(--bad-bg)', line: 'var(--bad-line)', text: 'var(--bad)', label: 'Критический риск' },
 };

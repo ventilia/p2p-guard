@@ -114,13 +114,6 @@ export const IconTrash = (p: IconProps) => (
   </Svg>
 );
 
-export const IconSearch = (p: IconProps) => (
-  <Svg {...p}>
-    <circle cx="10.8" cy="10.8" r="6.3" />
-    <path d="M15.4 15.4L20 20" />
-  </Svg>
-);
-
 export const IconCopy = (p: IconProps) => (
   <Svg {...p}>
     <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
@@ -209,12 +202,6 @@ export const IconNote = (p: IconProps) => (
   <Svg {...p}>
     <path d="M6 3.5h8.5L19 8v12.5H6z" />
     <path d="M14 3.5V8.5H19M9 12.5h6M9 16h4" />
-  </Svg>
-);
-
-export const IconChevron = (p: IconProps) => (
-  <Svg {...p}>
-    <path d="M9 5.5l6.5 6.5L9 18.5" />
   </Svg>
 );
 

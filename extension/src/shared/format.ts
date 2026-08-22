@@ -30,9 +30,6 @@ export const fmtDate = (iso: string | null | undefined): string =>
         minute: '2-digit',
       });
 
-export const fmtDateShort = (iso: string | null | undefined): string =>
-  !iso ? '—' : new Date(iso).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
-
 // от часа минуты в чистом виде читаются плохо
 export function fmtMinutes(minutes: number | null | undefined): string {
   if (minutes === null || minutes === undefined) return '—';

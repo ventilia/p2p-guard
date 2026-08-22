@@ -195,10 +195,6 @@ const HTML = `
 let host: HTMLElement | null = null;
 let onCloseHook: (() => void) | null = null;
 
-export function isOrderPageOpen(): boolean {
-  return host !== null;
-}
-
 export function openOrderPage(
   onClose: () => void,
   onPlacement: (value: 'chat-bottom' | 'floating') => void,

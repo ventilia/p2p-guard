@@ -5,4 +5,3 @@ export const prisma = new PrismaClient({
   log: env.isProd ? ['warn', 'error'] : ['warn', 'error'],
 });
 
-export type Db = typeof prisma;

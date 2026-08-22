@@ -87,11 +87,6 @@ export type RuntimeResponse<T = unknown> =
   | { ok: true; data: T }
   | { ok: false; error: { code: string; message: string } };
 
-// сообщения background → content script
-export type PushMessage =
-  | { type: 'PANEL_STATE'; state: PanelState }
-  | { type: 'DOSSIER_UPDATED'; dossier: Dossier; templates: MessageTemplate[] };
-
 export type SessionResponse = { session: Session | null; settings: Settings };
 
 // обёртка sendMessage с типами и без исключений на закрытом порту

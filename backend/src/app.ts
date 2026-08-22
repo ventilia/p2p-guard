@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { prisma } from './db.js';
 import { env } from './env.js';
 import { registerAuth } from './plugins/auth.js';
 import { registerErrorHandler, registerSecurity } from './plugins/security.js';
@@ -27,7 +28,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerSecurity(app);
   await registerAuth(app);
 
-  app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
+  // без запроса в базу проверка врала бы: сервер отвечает и с погашенной БД
+  app.get('/health', async (_req, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return { ok: true, db: true, ts: new Date().toISOString() };
+    } catch {
+      return reply.status(503).send({ ok: false, db: false, ts: new Date().toISOString() });
+    }
+  });
 
   await app.register(
     async (api) => {
