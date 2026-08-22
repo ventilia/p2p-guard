@@ -5,7 +5,6 @@ import { ErrorBox, Loading, Pager, fmtDate, fmtInt, useAsync } from '../ui';
 
 const LIMIT = 50;
 
-// незнакомый код покажем как есть
 const ACTION_LABEL: Record<string, string> = {
   'auth.activate': 'активация по токену',
   'auth.login': 'вход',
